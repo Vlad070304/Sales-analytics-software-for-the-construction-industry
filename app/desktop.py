@@ -54,6 +54,8 @@ class BuildSalesApp(tk.Tk):
         self.category_filter_combo: ttk.Combobox
         self.manager_filter_combo: ttk.Combobox
         self.customer_filter_combo: ttk.Combobox
+        self.main_canvas: tk.Canvas
+        self.main_content_window: int
         self.chart: tk.Canvas
         self.risk_table: ttk.Treeview
         self.manager_table: ttk.Treeview
@@ -137,8 +139,7 @@ class BuildSalesApp(tk.Tk):
             style="Accent.TButton",
             command=self.open_sale_form,
         ).pack(side="left")
-        body = tk.Frame(self, bg="#f7f8f3", padx=24, pady=20)
-        body.pack(fill="both", expand=True)
+        body = self._scrollable_body()
         self._filter_bar(body)
         self.kpi_frame = tk.Frame(body, bg="#f7f8f3")
         self.kpi_frame.pack(fill="x", pady=(0, 14))
@@ -150,6 +151,64 @@ class BuildSalesApp(tk.Tk):
         notebook.add(forecast, text="  Прогноз попиту  ")
         self._overview(overview)
         self._forecast(forecast)
+
+    def _scrollable_body(self) -> tk.Frame:
+        """Create the vertically scrollable dashboard area below the header."""
+        container = tk.Frame(self, bg="#f7f8f3")
+        container.pack(fill="both", expand=True)
+        self.main_canvas = tk.Canvas(container, bg="#f7f8f3", highlightthickness=0)
+        scrollbar = ttk.Scrollbar(container, orient="vertical", command=self.main_canvas.yview)
+        self.main_canvas.configure(yscrollcommand=scrollbar.set)
+        self.main_canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        body = tk.Frame(self.main_canvas, bg="#f7f8f3", padx=24, pady=20)
+        self.main_content_window = self.main_canvas.create_window((0, 0), window=body, anchor="nw")
+        body.bind("<Configure>", self._update_scroll_region)
+        self.main_canvas.bind("<Configure>", self._resize_scrollable_body)
+        self.bind_all("<MouseWheel>", self._scroll_main_content, add="+")
+        return body
+
+    def _update_scroll_region(self, _event: object = None) -> None:
+        """Update the main scrollbar after dashboard content changes size."""
+        self.main_canvas.configure(scrollregion=self.main_canvas.bbox("all"))
+
+    def _resize_scrollable_body(self, event: tk.Event) -> None:
+        """Keep the scrollable dashboard as wide as the application window."""
+        self.main_canvas.itemconfigure(self.main_content_window, width=event.width)
+
+    def _scroll_main_content(self, event: tk.Event) -> str | None:
+        """Scroll the dashboard unless the pointer is over an analytical table."""
+        widget = event.widget
+        while widget is not None:
+            if isinstance(widget, ttk.Treeview):
+                return None
+            parent_name = widget.winfo_parent()
+            if not parent_name:
+                break
+            try:
+                widget = self.nametowidget(parent_name)
+            except KeyError:
+                break
+        self.main_canvas.yview_scroll(-int(event.delta / 120), "units")
+        return "break"
+
+    @staticmethod
+    def _add_table_scrollbars(
+        parent: tk.Widget, table: ttk.Treeview, horizontal: bool = False
+    ) -> None:
+        """Place a table in a frame with vertical and optional horizontal scrolling."""
+        table_container = tk.Frame(parent, bg="#f7f8f3")
+        table_container.pack(fill="both", expand=True)
+        vertical = ttk.Scrollbar(table_container, orient="vertical", command=table.yview)
+        table.configure(yscrollcommand=vertical.set)
+        table.grid(row=0, column=0, sticky="nsew")
+        vertical.grid(row=0, column=1, sticky="ns")
+        table_container.grid_rowconfigure(0, weight=1)
+        table_container.grid_columnconfigure(0, weight=1)
+        if horizontal:
+            bottom = ttk.Scrollbar(table_container, orient="horizontal", command=table.xview)
+            table.configure(xscrollcommand=bottom.set)
+            bottom.grid(row=1, column=0, sticky="ew")
 
     def _filter_bar(self, parent: tk.Frame) -> None:
         filters = ttk.LabelFrame(parent, text=" Фільтри аналітики ", padding=10)
@@ -249,7 +308,7 @@ class BuildSalesApp(tk.Tk):
             for key, title in headings:
                 table.heading(key, text=title)
                 table.column(key, anchor="center", width=95)
-            table.pack(fill="both", expand=True)
+            self._add_table_scrollbars(table.master, table)
         self.risk_table.bind("<Double-1>", self.open_cpri_explanation)
 
     def _forecast(self, parent: tk.Frame) -> None:
@@ -297,7 +356,7 @@ class BuildSalesApp(tk.Tk):
         ]:
             self.forecast_table.heading(key, text=title)
             self.forecast_table.column(key, anchor="center", width=width)
-        self.forecast_table.pack(fill="both", expand=True)
+        self._add_table_scrollbars(parent, self.forecast_table, horizontal=True)
 
     def metrics(self) -> tuple[dict, list[dict]]:
         """Calculate dashboard data for the active filter selection."""
