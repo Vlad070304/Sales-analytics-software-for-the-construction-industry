@@ -110,6 +110,7 @@ class BuildSalesApp(tk.Tk):
         ).pack(anchor="w")
         actions = tk.Frame(header, bg="#17372c")
         actions.pack(side="right")
+        ttk.Button(actions, text="Допомога", command=self.show_help).pack(side="left", padx=(0, 8))
         ttk.Button(
             actions,
             text="Ваги CPRI",
@@ -195,6 +196,18 @@ class BuildSalesApp(tk.Tk):
         ).grid(row=3, column=4, sticky="w")
         ttk.Button(filters, text="Скинути", command=self.reset_filters).grid(
             row=3, column=5, sticky="w", padx=(8, 0)
+        )
+
+    def show_help(self) -> None:
+        """Display a compact guide to the main user workflows."""
+        messagebox.showinfo(
+            "Як користуватися програмою",
+            "1. Додайте продаж вручну або імпортуйте CSV.\n"
+            "2. Використайте фільтри для потрібного періоду, матеріалу, клієнта чи менеджера.\n"
+            "3. Двічі натисніть рядок CPRI, щоб побачити пояснення індексу.\n"
+            "4. Експортуйте відфільтровані продажі до CSV.\n\n"
+            "Детальна інструкція: файл START_HERE.md у папці програми.",
+            parent=self,
         )
 
     def _overview(self, parent: tk.Frame) -> None:

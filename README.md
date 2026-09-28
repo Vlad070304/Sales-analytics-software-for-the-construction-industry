@@ -17,7 +17,7 @@
 
 Потрібен Python 3.11+; зовнішні бібліотеки не потрібні.
 
-Найпростіший варіант у Windows — двічі натиснути [run.bat](D:\MAGISTERA\run.bat). Вікно програми відкриється автоматично.
+Найпростіший варіант у Windows — двічі натиснути [START_APPLICATION.bat](D:\MAGISTERA\START_APPLICATION.bat). Вікно програми відкриється автоматично.
 
 Якщо Windows не може знайти Python, встановіть його з [офіційного сайту](https://www.python.org/downloads/) і під час встановлення позначте **Add Python to PATH**.
 
@@ -29,6 +29,9 @@ python -m app.desktop
 
 Формат імпортного CSV наведено в [docs/import-format.md](docs/import-format.md).
 Заплановані напрями розвитку — у [docs/improvement-roadmap.md](docs/improvement-roadmap.md).
+Покрокова інструкція для користувача — у [START_HERE.md](D:\MAGISTERA\START_HERE.md).
+
+Для перевірки якості коду двічі натисніть [CHECK_PROJECT.bat](D:\MAGISTERA\CHECK_PROJECT.bat): він запускає Pylint, Ruff і всі автоматизовані тести.
 
 Відкриється вікно застосунку. Під час першого запуску буде створено SQLite-базу з демонстраційними даними.
 
