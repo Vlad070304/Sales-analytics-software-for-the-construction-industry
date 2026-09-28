@@ -16,6 +16,12 @@ class AnalyticsTests(unittest.TestCase):
         risk = shortage_risk([100, 120, 90], stock=5, lead_time_days=30)
         self.assertGreaterEqual(risk["score"], 60)
 
+    def test_seasonal_acceleration_is_reflected_in_risk(self):
+        baseline = shortage_risk([100, 100, 100], stock=100, lead_time_days=10, next_forecast=100)
+        growing = shortage_risk([100, 100, 100], stock=100, lead_time_days=10, next_forecast=200)
+        self.assertGreater(growing["score"], baseline["score"])
+        self.assertGreater(growing["seasonality_component"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

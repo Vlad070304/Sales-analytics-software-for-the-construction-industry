@@ -55,7 +55,7 @@ class BuildSalesApp(tk.Tk):
         self.chart.pack(fill="x")
         lower = tk.Frame(parent, bg="#f7f8f3")
         lower.pack(fill="both", expand=True)
-        risk_frame = ttk.LabelFrame(lower, text=" Індекс ризику дефіциту SRI ", padding=10)
+        risk_frame = ttk.LabelFrame(lower, text=" Індекс пріоритету закупівлі CPRI ", padding=10)
         risk_frame.pack(side="left", fill="both", expand=True, padx=(0, 7))
         manager_frame = ttk.LabelFrame(lower, text=" Ефективність менеджерів ", padding=10)
         manager_frame.pack(side="left", fill="both", expand=True, padx=(7, 0))
@@ -71,7 +71,7 @@ class BuildSalesApp(tk.Tk):
         self.forecast_table = ttk.Treeview(parent, columns=columns, show="tree headings")
         self.forecast_table.heading("#0", text="Матеріал")
         self.forecast_table.column("#0", width=205)
-        for key, title in [("category", "Категорія"), ("stock", "Запас"), ("risk", "SRI"), ("month1", "Місяць +1"), ("month2", "Місяць +2"), ("month3", "Місяць +3")]:
+        for key, title in [("category", "Категорія"), ("stock", "Запас"), ("risk", "CPRI"), ("month1", "Місяць +1"), ("month2", "Місяць +2"), ("month3", "Місяць +3")]:
             self.forecast_table.heading(key, text=title); self.forecast_table.column(key, anchor="center", width=125)
         self.forecast_table.pack(fill="both", expand=True)
 
@@ -87,7 +87,8 @@ class BuildSalesApp(tk.Tk):
             with connection() as conn:
                 points = conn.execute("SELECT substr(sold_at, 1, 7) period, SUM(quantity) qty FROM sales WHERE material_id=? GROUP BY period ORDER BY period", (material["id"],)).fetchall()
             series = [(row["period"], row["qty"]) for row in points]
-            materials.append({**material, "forecast": demand_forecast(series), "risk": shortage_risk([v for _, v in series][-12:], material["stock"], material["lead_time_days"])})
+            forecast = demand_forecast(series)
+            materials.append({**material, "forecast": forecast, "risk": shortage_risk([v for _, v in series][-12:], material["stock"], material["lead_time_days"], forecast[0]["quantity"] if forecast else None)})
         return {"sales": sales, "monthly": monthly, "materials": materials, "managers": manager_scores(sales)}, materials
 
     def refresh(self) -> None:
