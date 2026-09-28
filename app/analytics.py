@@ -115,6 +115,53 @@ def forecast_accuracy(monthly: list[tuple[str, float]], min_train_periods: int =
     }
 
 
+def procurement_recommendation(
+    next_forecast: float | None,
+    stock: float,
+    lead_time_days: int,
+    forecast_mae: float | None,
+    service_factor: float = 1.28,
+) -> dict:
+    """Recommend replenishment using forecast demand and an error-based safety stock.
+
+    ``service_factor=1.28`` corresponds to an approximate 90% one-sided
+    service level under a normal-error approximation. The confidence score is
+    an interpretable relative forecast reliability indicator, not a guarantee.
+    """
+    if next_forecast is None:
+        return {
+            "lead_demand": 0.0,
+            "safety_stock": 0.0,
+            "target_stock": 0.0,
+            "order_quantity": 0.0,
+            "confidence": None,
+            "confidence_level": "недостатньо даних",
+        }
+    lead_months = max(lead_time_days, 1) / 30
+    lead_demand = max(0, next_forecast) * lead_months
+    error = max(0, forecast_mae or 0)
+    safety_stock = service_factor * error * sqrt(lead_months)
+    target_stock = lead_demand + safety_stock
+    confidence = None if forecast_mae is None else max(0, 100 * (1 - error / max(next_forecast, 1)))
+    confidence_level = (
+        "недостатньо даних"
+        if confidence is None
+        else "висока"
+        if confidence >= 75
+        else "середня"
+        if confidence >= 50
+        else "низька"
+    )
+    return {
+        "lead_demand": round(lead_demand, 2),
+        "safety_stock": round(safety_stock, 2),
+        "target_stock": round(target_stock, 2),
+        "order_quantity": round(max(0, target_stock - max(stock, 0)), 2),
+        "confidence": round(confidence, 1) if confidence is not None else None,
+        "confidence_level": confidence_level,
+    }
+
+
 # Expert weights of the CPRI components: demand over lead time (D), demand
 # volatility (V), lead time (L) and seasonal acceleration (S).
 CPRI_WEIGHTS: dict[str, float] = {

@@ -12,6 +12,7 @@ from app.analytics import (
     demand_forecast,
     forecast_accuracy,
     manager_scores,
+    procurement_recommendation,
     shortage_risk,
 )
 from app.database import (
@@ -280,7 +281,7 @@ class BuildSalesApp(tk.Tk):
         manager_frame.pack(side="left", fill="both", expand=True, padx=(7, 0))
         self.risk_table = ttk.Treeview(
             risk_frame,
-            columns=("risk", "level", "stock"),
+            columns=("risk", "level", "stock", "order"),
             show="tree headings",
             height=7,
         )
@@ -295,7 +296,12 @@ class BuildSalesApp(tk.Tk):
         for table, headings in (
             (
                 self.risk_table,
-                [("risk", "CPRI"), ("level", "Рівень"), ("stock", "Запас")],
+                [
+                    ("risk", "CPRI"),
+                    ("level", "Рівень"),
+                    ("stock", "Запас"),
+                    ("order", "Закупити"),
+                ],
             ),
             (
                 self.manager_table,
@@ -316,7 +322,9 @@ class BuildSalesApp(tk.Tk):
                 "MAE, RMSE та MAPE — rolling backtesting. «Виграш» показує, на "
                 "скільки % MAE моделі менша за наївний сезонний прогноз; "
                 "від'ємне значення означає гірший результат. Базова MAE та виграш "
-                "обчислюються лише за місяцями з відомим попереднім роком."
+                "обчислюються лише за місяцями з відомим попереднім роком. "
+                "«Закупити» додає страховий запас з похибки прогнозу; "
+                "надійність показує відносну точність прогнозу."
             ),
             bg="#f7f8f3",
             fg="#53645b",
@@ -334,6 +342,8 @@ class BuildSalesApp(tk.Tk):
             "mape",
             "baseline_mae",
             "gain",
+            "order",
+            "confidence",
         )
         self.forecast_table = ttk.Treeview(parent, columns=columns, show="tree headings")
         self.forecast_table.heading("#0", text="Матеріал")
@@ -350,6 +360,8 @@ class BuildSalesApp(tk.Tk):
             ("mape", "MAPE, %", 75),
             ("baseline_mae", "MAE базова", 85),
             ("gain", "Виграш, %", 80),
+            ("order", "Закупити", 90),
+            ("confidence", "Надійність, %", 105),
         ]:
             self.forecast_table.heading(key, text=title)
             self.forecast_table.column(key, anchor="center", width=width)
@@ -412,11 +424,12 @@ class BuildSalesApp(tk.Tk):
                 ).fetchall()
             series = [(row["period"], row["qty"]) for row in points]
             forecast = demand_forecast(series)
+            accuracy = forecast_accuracy(series)
             materials.append(
                 {
                     **material,
                     "forecast": forecast,
-                    "accuracy": forecast_accuracy(series),
+                    "accuracy": accuracy,
                     "weights": dict(self.cpri_weights),
                     "risk": shortage_risk(
                         [v for _, v in series][-12:],
@@ -424,6 +437,12 @@ class BuildSalesApp(tk.Tk):
                         material["lead_time_days"],
                         forecast[0]["quantity"] if forecast else None,
                         weights=self.cpri_weights,
+                    ),
+                    "procurement": procurement_recommendation(
+                        forecast[0]["quantity"] if forecast else None,
+                        material["stock"],
+                        material["lead_time_days"],
+                        accuracy["mae"],
                     ),
                 }
             )
@@ -532,6 +551,7 @@ class BuildSalesApp(tk.Tk):
                     m["risk"]["score"],
                     m["risk"]["level"],
                     f"{m['stock']} {m['unit']}",
+                    f"{m['procurement']['order_quantity']} {m['unit']}",
                 ),
             )
             forecast = [f"{point['period']}: {point['quantity']}" for point in m["forecast"]]
@@ -553,6 +573,10 @@ class BuildSalesApp(tk.Tk):
                     m["risk"]["score"],
                     *forecast,
                     *quality,
+                    f"{m['procurement']['order_quantity']} {m['unit']}",
+                    "—"
+                    if m["procurement"]["confidence"] is None
+                    else m["procurement"]["confidence"],
                 ),
             )
         for m in data["managers"]:
@@ -585,6 +609,20 @@ class BuildSalesApp(tk.Tk):
             fg="#176b4c",
             font=("Segoe UI", 11, "bold"),
         ).pack(anchor="w", pady=(4, 14))
+        procurement = material["procurement"]
+        confidence = procurement["confidence"]
+        confidence_text = "недостатньо даних" if confidence is None else f"{confidence}%"
+        tk.Label(
+            frame,
+            text=(
+                f"Рекомендована закупівля: {procurement['order_quantity']} {material['unit']} · "
+                f"страховий запас: {procurement['safety_stock']} {material['unit']} · "
+                f"надійність: {confidence_text} ({procurement['confidence_level']})"
+            ),
+            fg="#53645b",
+            wraplength=590,
+            justify="left",
+        ).pack(anchor="w", pady=(0, 12))
         tk.Label(
             frame,
             text="Формула: 100 × ("

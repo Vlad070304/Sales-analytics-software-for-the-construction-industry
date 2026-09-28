@@ -6,6 +6,7 @@ from app.analytics import (
     demand_forecast,
     forecast_accuracy,
     linear_trend,
+    procurement_recommendation,
     seasonal_naive_forecast,
     shortage_risk,
     validate_weights,
@@ -132,6 +133,28 @@ class AnalyticsTests(unittest.TestCase):
         result = calibrate_cpri_weights([])
         self.assertIsNone(result["weights"])
         self.assertEqual(result["observations"], 0)
+
+    def test_procurement_recommendation_adds_safety_stock_from_forecast_error(self):
+        result = procurement_recommendation(
+            next_forecast=100,
+            stock=80,
+            lead_time_days=30,
+            forecast_mae=10,
+        )
+        self.assertEqual(result["lead_demand"], 100.0)
+        self.assertEqual(result["safety_stock"], 12.8)
+        self.assertEqual(result["order_quantity"], 32.8)
+        self.assertEqual(result["confidence"], 90.0)
+
+    def test_procurement_recommendation_marks_unknown_accuracy(self):
+        result = procurement_recommendation(
+            next_forecast=100,
+            stock=80,
+            lead_time_days=30,
+            forecast_mae=None,
+        )
+        self.assertIsNone(result["confidence"])
+        self.assertEqual(result["confidence_level"], "недостатньо даних")
 
 
 if __name__ == "__main__":
