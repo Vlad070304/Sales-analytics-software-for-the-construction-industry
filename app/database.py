@@ -126,12 +126,8 @@ def add_sale(payload: dict) -> int:
         return cursor.lastrowid
 
 
-def import_sales_csv(file_path: str | Path) -> dict:
-    """Import validated sales from a UTF-8 or Windows-1251 CSV file.
-
-    Required columns: sold_at, material, manager, customer, quantity, unit_price.
-    The entire file is transactional: if no records are valid, the database is unchanged.
-    """
+def preview_sales_csv(file_path: str | Path) -> dict:
+    """Parse and validate CSV rows without changing the database."""
     required = {"sold_at", "material", "manager", "customer", "quantity", "unit_price"}
     path = Path(file_path)
     try:
@@ -143,7 +139,7 @@ def import_sales_csv(file_path: str | Path) -> dict:
     if not required.issubset(headers):
         missing = ", ".join(sorted(required - headers))
         raise ValueError(f"У CSV відсутні обов'язкові колонки: {missing}.")
-    prepared: list[tuple] = []
+    records: list[dict] = []
     errors: list[str] = []
     with connection() as conn:
         material_ids = {row["name"]: row["id"] for row in conn.execute("SELECT id, name FROM materials")}
@@ -158,12 +154,26 @@ def import_sales_csv(file_path: str | Path) -> dict:
                 unit_price = float((row["unit_price"] or "").replace(",", "."))
                 if not manager or not customer or quantity <= 0 or unit_price < 0:
                     raise ValueError("некоректні текстові або числові дані")
-                prepared.append((sold_at, material_id, manager, customer, quantity, unit_price))
+                records.append({"sold_at": sold_at, "material": row["material"].strip(), "material_id": material_id, "manager": manager, "customer": customer, "quantity": quantity, "unit_price": unit_price})
             except (KeyError, TypeError, ValueError) as error:
                 errors.append(f"рядок {line_number}: {error}")
-        if prepared:
-            conn.executemany(
-                "INSERT INTO sales(sold_at, material_id, manager, customer, quantity, unit_price) VALUES (?, ?, ?, ?, ?, ?)",
-                prepared,
-            )
-    return {"inserted": len(prepared), "skipped": len(errors), "errors": errors}
+    return {"records": records, "valid": len(records), "skipped": len(errors), "errors": errors}
+
+
+def save_import_records(records: list[dict]) -> int:
+    """Persist records previously returned by preview_sales_csv in one transaction."""
+    if not records:
+        return 0
+    values = [(row["sold_at"], row["material_id"], row["manager"], row["customer"], row["quantity"], row["unit_price"]) for row in records]
+    with connection() as conn:
+        conn.executemany(
+            "INSERT INTO sales(sold_at, material_id, manager, customer, quantity, unit_price) VALUES (?, ?, ?, ?, ?, ?)", values
+        )
+    return len(values)
+
+
+def import_sales_csv(file_path: str | Path) -> dict:
+    """Compatibility helper that previews and immediately saves valid CSV rows."""
+    report = preview_sales_csv(file_path)
+    report["inserted"] = save_import_records(report["records"])
+    return report

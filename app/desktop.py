@@ -6,7 +6,7 @@ from datetime import date
 from tkinter import filedialog, messagebox, ttk
 
 from app.analytics import demand_forecast, manager_scores, shortage_risk
-from app.database import add_material, add_sale, connection, delete_material, fetch_materials, import_sales_csv, initialize, update_material
+from app.database import add_material, add_sale, connection, delete_material, fetch_materials, initialize, preview_sales_csv, save_import_records, update_material
 
 
 class BuildSalesApp(tk.Tk):
@@ -218,13 +218,41 @@ class BuildSalesApp(tk.Tk):
         if not path:
             return
         try:
-            report = import_sales_csv(path)
-            self.refresh()
-            details = "\n".join(report["errors"][:5])
-            extra = f"\n\nНе імпортовано: {report['skipped']}\n{details}" if report["skipped"] else ""
-            messagebox.showinfo("Імпорт завершено", f"Імпортовано записів: {report['inserted']}.{extra}", parent=self)
+            report = preview_sales_csv(path)
+            self.open_import_preview(report)
         except (OSError, ValueError) as error:
             messagebox.showerror("Помилка імпорту", str(error), parent=self)
+
+    def open_import_preview(self, report: dict) -> None:
+        if not report["records"]:
+            details = "\n".join(report["errors"][:5])
+            messagebox.showwarning("Немає даних для імпорту", f"Коректних записів не знайдено.\n{details}", parent=self)
+            return
+        window = tk.Toplevel(self)
+        window.title("Попередній перегляд імпорту")
+        window.geometry("930x500")
+        window.transient(self); window.grab_set()
+        frame = tk.Frame(window, padx=18, pady=18); frame.pack(fill="both", expand=True)
+        tk.Label(frame, text="Перевірте дані перед збереженням", font=("Segoe UI", 15, "bold")).pack(anchor="w")
+        details = f"Коректних рядків: {report['valid']}."
+        if report["skipped"]:
+            details += f" Пропущено: {report['skipped']}. " + " ".join(report["errors"][:2])
+        tk.Label(frame, text=details, fg="#53645b", wraplength=860, justify="left").pack(anchor="w", pady=(4, 12))
+        columns = ("date", "material", "manager", "customer", "quantity", "price")
+        table = ttk.Treeview(frame, columns=columns, show="headings")
+        for key, title, width in [("date", "Дата", 95), ("material", "Матеріал", 180), ("manager", "Менеджер", 145), ("customer", "Клієнт", 180), ("quantity", "Кількість", 95), ("price", "Ціна, ₴", 100)]:
+            table.heading(key, text=title); table.column(key, width=width, anchor="center")
+        table.pack(fill="both", expand=True)
+        for row in report["records"][:100]:
+            table.insert("", "end", values=(row["sold_at"], row["material"], row["manager"], row["customer"], row["quantity"], row["unit_price"]))
+        footer = tk.Frame(frame); footer.pack(fill="x", pady=(12, 0))
+        tk.Label(footer, text="Показано перші 100 рядків." if report["valid"] > 100 else "Усі рядки показано.", fg="#53645b").pack(side="left")
+        def confirm() -> None:
+            inserted = save_import_records(report["records"])
+            window.destroy(); self.refresh()
+            messagebox.showinfo("Імпорт завершено", f"Імпортовано записів: {inserted}.", parent=self)
+        ttk.Button(footer, text="Скасувати", command=window.destroy).pack(side="right")
+        ttk.Button(footer, text="Підтвердити імпорт", style="Accent.TButton", command=confirm).pack(side="right", padx=(0, 8))
 
 
 def main() -> None:
