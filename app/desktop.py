@@ -43,12 +43,16 @@ class BuildSalesApp(tk.Tk):
         self.configure(bg="#f7f8f3")
         self.filter_start = tk.StringVar()
         self.filter_end = tk.StringVar()
+        self.filter_category = tk.StringVar(value="Усі категорії")
         self.filter_material = tk.StringVar(value="Усі матеріали")
         self.filter_manager = tk.StringVar(value="Усі менеджери")
+        self.filter_customer = tk.StringVar(value="Усі клієнти")
         self.risk_details: dict[str, dict] = {}
         self.cpri_weights = get_cpri_weights()
         self.material_filter_combo: ttk.Combobox
+        self.category_filter_combo: ttk.Combobox
         self.manager_filter_combo: ttk.Combobox
+        self.customer_filter_combo: ttk.Combobox
         self.chart: tk.Canvas
         self.risk_table: ttk.Treeview
         self.manager_table: ttk.Treeview
@@ -165,14 +169,28 @@ class BuildSalesApp(tk.Tk):
             filters, textvariable=self.filter_manager, state="readonly", width=21
         )
         self.manager_filter_combo.grid(row=1, column=5, sticky="w", padx=(0, 12))
+        tk.Label(filters, text="Категорія").grid(
+            row=2, column=0, sticky="w", padx=(0, 5), pady=(10, 0)
+        )
+        self.category_filter_combo = ttk.Combobox(
+            filters, textvariable=self.filter_category, state="readonly", width=23
+        )
+        self.category_filter_combo.grid(row=3, column=0, sticky="w", padx=(0, 12))
+        tk.Label(filters, text="Клієнт").grid(
+            row=2, column=2, sticky="w", padx=(0, 5), pady=(10, 0)
+        )
+        self.customer_filter_combo = ttk.Combobox(
+            filters, textvariable=self.filter_customer, state="readonly", width=23
+        )
+        self.customer_filter_combo.grid(row=3, column=2, sticky="w", padx=(0, 12))
         ttk.Button(
             filters,
             text="Застосувати",
             style="Accent.TButton",
             command=self.apply_filters,
-        ).grid(row=1, column=6, sticky="w")
+        ).grid(row=3, column=4, sticky="w")
         ttk.Button(filters, text="Скинути", command=self.reset_filters).grid(
-            row=1, column=7, sticky="w", padx=(8, 0)
+            row=3, column=5, sticky="w", padx=(8, 0)
         )
 
     def _overview(self, parent: tk.Frame) -> None:
@@ -264,18 +282,33 @@ class BuildSalesApp(tk.Tk):
         params: list[object] = []
         material_names = {item["name"]: item for item in fetch_materials()}
         selected_material = material_names.get(self.filter_material.get())
+        scoped_materials = list(material_names.values())
+        if self.filter_category.get() != "Усі категорії":
+            scoped_materials = [
+                material
+                for material in scoped_materials
+                if material["category"] == self.filter_category.get()
+            ]
+        if selected_material is not None:
+            scoped_materials = [selected_material] if selected_material in scoped_materials else []
         if self.filter_start.get():
             clauses.append("sold_at >= ?")
             params.append(self.filter_start.get())
         if self.filter_end.get():
             clauses.append("sold_at <= ?")
             params.append(self.filter_end.get())
-        if selected_material:
-            clauses.append("material_id = ?")
-            params.append(selected_material["id"])
+        if scoped_materials:
+            placeholders = ", ".join("?" for _ in scoped_materials)
+            clauses.append(f"material_id IN ({placeholders})")
+            params.extend(material["id"] for material in scoped_materials)
+        elif self.filter_category.get() != "Усі категорії":
+            clauses.append("1 = 0")
         if self.filter_manager.get() != "Усі менеджери":
             clauses.append("manager = ?")
             params.append(self.filter_manager.get())
+        if self.filter_customer.get() != "Усі клієнти":
+            clauses.append("customer = ?")
+            params.append(self.filter_customer.get())
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
         with connection() as conn:
             sales = [
@@ -287,8 +320,7 @@ class BuildSalesApp(tk.Tk):
             period = row["sold_at"][:7]
             monthly[period] = monthly.get(period, 0) + row["quantity"] * row["unit_price"]
         materials = []
-        material_scope = [selected_material] if selected_material else list(material_names.values())
-        for material in material_scope:
+        for material in scoped_materials:
             material_clauses = ["material_id = ?", *clauses]
             material_params = [material["id"], *params]
             with connection() as conn:
@@ -337,28 +369,40 @@ class BuildSalesApp(tk.Tk):
         """Restore default filters and refresh all dashboard outputs."""
         self.filter_start.set("")
         self.filter_end.set("")
+        self.filter_category.set("Усі категорії")
         self.filter_material.set("Усі матеріали")
         self.filter_manager.set("Усі менеджери")
+        self.filter_customer.set("Усі клієнти")
         self.refresh()
 
     def refresh_filter_values(self) -> None:
         """Synchronise filter values with available materials and managers."""
-        material_values = [
-            "Усі матеріали",
-            *[item["name"] for item in fetch_materials()],
-        ]
+        materials = fetch_materials()
+        material_values = ["Усі матеріали", *[item["name"] for item in materials]]
+        category_values = ["Усі категорії", *sorted({item["category"] for item in materials})]
         with connection() as conn:
             managers = [
                 row[0]
                 for row in conn.execute("SELECT DISTINCT manager FROM sales ORDER BY manager")
             ]
+            customers = [
+                row[0]
+                for row in conn.execute("SELECT DISTINCT customer FROM sales ORDER BY customer")
+            ]
         manager_values = ["Усі менеджери", *managers]
+        customer_values = ["Усі клієнти", *customers]
         self.material_filter_combo["values"] = material_values
+        self.category_filter_combo["values"] = category_values
         self.manager_filter_combo["values"] = manager_values
+        self.customer_filter_combo["values"] = customer_values
         if self.filter_material.get() not in material_values:
             self.filter_material.set("Усі матеріали")
         if self.filter_manager.get() not in manager_values:
             self.filter_manager.set("Усі менеджери")
+        if self.filter_category.get() not in category_values:
+            self.filter_category.set("Усі категорії")
+        if self.filter_customer.get() not in customer_values:
+            self.filter_customer.set("Усі клієнти")
 
     def refresh(self) -> None:
         """Recalculate and redraw every dashboard component."""
