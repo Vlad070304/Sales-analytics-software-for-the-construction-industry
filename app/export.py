@@ -22,7 +22,6 @@ def export_sales_csv(rows: list[dict], destination: str | Path) -> Path:
     """Save sales rows as a UTF-8 CSV with a BOM for spreadsheet compatibility."""
     path = Path(destination)
     with path.open("w", encoding="utf-8-sig", newline="") as file:
-        keys = [key for key, _ in EXPORT_COLUMNS]
         labels = [label for _, label in EXPORT_COLUMNS]
         writer = csv.DictWriter(file, fieldnames=labels)
         writer.writeheader()
