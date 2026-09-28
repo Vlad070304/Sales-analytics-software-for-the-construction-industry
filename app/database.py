@@ -5,9 +5,12 @@ from __future__ import annotations
 import sqlite3
 import csv
 import shutil
+import json
 from math import isfinite
 from datetime import date, datetime
 from pathlib import Path
+
+from app.analytics import CPRI_WEIGHTS, validate_weights
 
 DATABASE_PATH = Path(__file__).resolve().parent.parent / "data" / "buildsales.sqlite3"
 
@@ -53,6 +56,9 @@ def initialize() -> None:
             CREATE TABLE IF NOT EXISTS audit_log (
               id INTEGER PRIMARY KEY, created_at TEXT NOT NULL,
               event_type TEXT NOT NULL, details TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS app_settings (
+              setting_key TEXT PRIMARY KEY, setting_value TEXT NOT NULL
             );
             """
         )
@@ -147,6 +153,33 @@ def fetch_events(limit: int = 100) -> list[dict]:
             dict(row)
             for row in conn.execute("SELECT * FROM audit_log ORDER BY id DESC LIMIT ?", (limit,))
         ]
+
+
+def get_cpri_weights() -> dict[str, float]:
+    """Return persisted CPRI weights or the default expert configuration."""
+    with connection() as conn:
+        row = conn.execute(
+            "SELECT setting_value FROM app_settings WHERE setting_key=?",
+            ("cpri_weights",),
+        ).fetchone()
+    if row is None:
+        return dict(CPRI_WEIGHTS)
+    try:
+        return validate_weights(json.loads(row["setting_value"]))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return dict(CPRI_WEIGHTS)
+
+
+def save_cpri_weights(weights: dict[str, float]) -> None:
+    """Validate, persist, and audit a custom CPRI weight configuration."""
+    validated = validate_weights(weights)
+    with connection() as conn:
+        conn.execute(
+            "INSERT INTO app_settings(setting_key, setting_value) VALUES (?, ?) "
+            "ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value",
+            ("cpri_weights", json.dumps(validated)),
+        )
+    log_event("cpri_weights", json.dumps(validated, ensure_ascii=False))
 
 
 def validate_material(payload: dict) -> tuple[str, str, str, float, int]:

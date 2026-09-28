@@ -21,10 +21,12 @@ from app.database import (
     delete_material,
     fetch_events,
     fetch_materials,
+    get_cpri_weights,
     initialize,
     log_event,
     preview_sales_csv,
     save_import_records,
+    save_cpri_weights,
     update_material,
 )
 
@@ -44,6 +46,7 @@ class BuildSalesApp(tk.Tk):
         self.filter_material = tk.StringVar(value="Усі матеріали")
         self.filter_manager = tk.StringVar(value="Усі менеджери")
         self.risk_details: dict[str, dict] = {}
+        self.cpri_weights = get_cpri_weights()
         self.material_filter_combo: ttk.Combobox
         self.manager_filter_combo: ttk.Combobox
         self.chart: tk.Canvas
@@ -102,6 +105,11 @@ class BuildSalesApp(tk.Tk):
         ).pack(anchor="w")
         actions = tk.Frame(header, bg="#17372c")
         actions.pack(side="right")
+        ttk.Button(
+            actions,
+            text="Ваги CPRI",
+            command=self.open_cpri_settings,
+        ).pack(side="left", padx=(0, 8))
         ttk.Button(actions, text="Журнал", command=self.open_event_log).pack(
             side="left", padx=(0, 8)
         )
@@ -251,6 +259,7 @@ class BuildSalesApp(tk.Tk):
 
     def metrics(self) -> tuple[dict, list[dict]]:
         """Calculate dashboard data for the active filter selection."""
+        self.cpri_weights = get_cpri_weights()
         clauses: list[str] = []
         params: list[object] = []
         material_names = {item["name"]: item for item in fetch_materials()}
@@ -296,11 +305,13 @@ class BuildSalesApp(tk.Tk):
                     **material,
                     "forecast": forecast,
                     "accuracy": forecast_accuracy(series),
+                    "weights": dict(self.cpri_weights),
                     "risk": shortage_risk(
                         [v for _, v in series][-12:],
                         material["stock"],
                         material["lead_time_days"],
                         forecast[0]["quantity"] if forecast else None,
+                        weights=self.cpri_weights,
                     ),
                 }
             )
@@ -454,7 +465,7 @@ class BuildSalesApp(tk.Tk):
             frame,
             text="Формула: 100 × ("
             + " + ".join(
-                f"{CPRI_WEIGHTS[key]:.2f}{letter}"
+                f"{material['weights'][key]:.2f}{letter}"
                 for key, letter in (
                     ("demand", "D"),
                     ("volatility", "V"),
@@ -482,18 +493,18 @@ class BuildSalesApp(tk.Tk):
             (
                 "D — попит на строк постачання",
                 risk["demand_component"],
-                CPRI_WEIGHTS["demand"],
+                material["weights"]["demand"],
             ),
             (
                 "V — нестабільність попиту",
                 risk["volatility_component"],
-                CPRI_WEIGHTS["volatility"],
+                material["weights"]["volatility"],
             ),
-            ("L — строк постачання", risk["lead_component"], CPRI_WEIGHTS["lead"]),
+            ("L — строк постачання", risk["lead_component"], material["weights"]["lead"]),
             (
                 "S — сезонне прискорення",
                 risk["seasonality_component"],
-                CPRI_WEIGHTS["seasonality"],
+                material["weights"]["seasonality"],
             ),
         ]
         for label, value, weight in components:
@@ -517,6 +528,87 @@ class BuildSalesApp(tk.Tk):
             justify="left",
             fg="#53645b",
         ).pack(anchor="w", pady=(12, 0))
+
+    def open_cpri_settings(self) -> None:
+        """Allow an analyst to configure and persist explainable CPRI weights."""
+        window = tk.Toplevel(self)
+        window.title("Налаштування ваг CPRI")
+        window.transient(self)
+        window.grab_set()
+        window.resizable(False, False)
+        frame = tk.Frame(window, padx=24, pady=20)
+        frame.pack()
+        tk.Label(
+            frame,
+            text="Ваги індексу CPRI",
+            font=("Segoe UI", 15, "bold"),
+        ).pack(anchor="w")
+        tk.Label(
+            frame,
+            text=(
+                "Сума ваг повинна дорівнювати 1. Зміна ваг впливає на майбутні "
+                "аналітичні розрахунки, але не змінює історію продажів."
+            ),
+            fg="#53645b",
+            wraplength=440,
+            justify="left",
+        ).pack(anchor="w", pady=(4, 14))
+        labels = {
+            "demand": "D — попит на строк постачання",
+            "volatility": "V — нестабільність попиту",
+            "lead": "L — строк постачання",
+            "seasonality": "S — сезонне прискорення",
+        }
+        entries: dict[str, ttk.Entry] = {}
+        for key in CPRI_WEIGHTS:
+            row = tk.Frame(frame)
+            row.pack(fill="x", pady=4)
+            tk.Label(row, text=labels[key], width=34, anchor="w").pack(side="left")
+            entry = ttk.Entry(row, width=10)
+            entry.insert(0, str(self.cpri_weights[key]))
+            entry.pack(side="right")
+            entries[key] = entry
+        total_label = tk.Label(frame, fg="#53645b")
+        total_label.pack(anchor="w", pady=(10, 0))
+
+        def current_weights() -> dict[str, float]:
+            return {key: float(entry.get().replace(",", ".")) for key, entry in entries.items()}
+
+        def show_total(*_args: object) -> None:
+            try:
+                total_label.configure(text=f"Поточна сума: {sum(current_weights().values()):.3f}")
+            except ValueError:
+                total_label.configure(text="Поточна сума: некоректне числове значення")
+
+        for entry in entries.values():
+            entry.bind("<KeyRelease>", show_total)
+        show_total()
+
+        def restore_defaults() -> None:
+            for key, entry in entries.items():
+                entry.delete(0, tk.END)
+                entry.insert(0, str(CPRI_WEIGHTS[key]))
+            show_total()
+
+        def save() -> None:
+            try:
+                save_cpri_weights(current_weights())
+            except ValueError as error:
+                messagebox.showerror("Неможливо зберегти", str(error), parent=window)
+                return
+            window.destroy()
+            self.refresh()
+
+        controls = tk.Frame(frame)
+        controls.pack(fill="x", pady=(16, 0))
+        ttk.Button(controls, text="Стандартні ваги", command=restore_defaults).pack(side="left")
+        ttk.Button(controls, text="Скасувати", command=window.destroy).pack(side="right")
+        ttk.Button(
+            controls,
+            text="Зберегти",
+            style="Accent.TButton",
+            command=save,
+        ).pack(side="right", padx=(0, 8))
 
     def draw_chart(self, monthly: dict[str, float]) -> None:
         """Draw the monthly-revenue bar chart on the canvas."""
