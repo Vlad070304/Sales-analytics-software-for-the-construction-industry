@@ -197,18 +197,14 @@ class BuildSalesApp(tk.Tk):
         parent: tk.Widget, table: ttk.Treeview, horizontal: bool = False
     ) -> None:
         """Place a table in a frame with vertical and optional horizontal scrolling."""
-        table_container = tk.Frame(parent, bg="#f7f8f3")
-        table_container.pack(fill="both", expand=True)
-        vertical = ttk.Scrollbar(table_container, orient="vertical", command=table.yview)
+        vertical = ttk.Scrollbar(parent, orient="vertical", command=table.yview)
         table.configure(yscrollcommand=vertical.set)
-        table.grid(row=0, column=0, sticky="nsew")
-        vertical.grid(row=0, column=1, sticky="ns")
-        table_container.grid_rowconfigure(0, weight=1)
-        table_container.grid_columnconfigure(0, weight=1)
+        vertical.pack(side="right", fill="y")
         if horizontal:
-            bottom = ttk.Scrollbar(table_container, orient="horizontal", command=table.xview)
+            bottom = ttk.Scrollbar(parent, orient="horizontal", command=table.xview)
             table.configure(xscrollcommand=bottom.set)
-            bottom.grid(row=1, column=0, sticky="ew")
+            bottom.pack(side="bottom", fill="x")
+        table.pack(side="left", fill="both", expand=True)
 
     def _filter_bar(self, parent: tk.Frame) -> None:
         filters = ttk.LabelFrame(parent, text=" Фільтри аналітики ", padding=10)
