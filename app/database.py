@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import sqlite3
+import csv
 from datetime import date
 from pathlib import Path
 
@@ -77,3 +78,46 @@ def add_sale(payload: dict) -> int:
             tuple(payload[field] for field in required),
         )
         return cursor.lastrowid
+
+
+def import_sales_csv(file_path: str | Path) -> dict:
+    """Import validated sales from a UTF-8 or Windows-1251 CSV file.
+
+    Required columns: sold_at, material, manager, customer, quantity, unit_price.
+    The entire file is transactional: if no records are valid, the database is unchanged.
+    """
+    required = {"sold_at", "material", "manager", "customer", "quantity", "unit_price"}
+    path = Path(file_path)
+    try:
+        content = path.read_text(encoding="utf-8-sig")
+    except UnicodeDecodeError:
+        content = path.read_text(encoding="cp1251")
+    reader = csv.DictReader(content.splitlines())
+    headers = set(reader.fieldnames or [])
+    if not required.issubset(headers):
+        missing = ", ".join(sorted(required - headers))
+        raise ValueError(f"У CSV відсутні обов'язкові колонки: {missing}.")
+    prepared: list[tuple] = []
+    errors: list[str] = []
+    with connection() as conn:
+        material_ids = {row["name"]: row["id"] for row in conn.execute("SELECT id, name FROM materials")}
+        for line_number, row in enumerate(reader, start=2):
+            try:
+                sold_at = (row["sold_at"] or "").strip()
+                date.fromisoformat(sold_at)
+                material_id = material_ids[(row["material"] or "").strip()]
+                manager = (row["manager"] or "").strip()
+                customer = (row["customer"] or "").strip()
+                quantity = float((row["quantity"] or "").replace(",", "."))
+                unit_price = float((row["unit_price"] or "").replace(",", "."))
+                if not manager or not customer or quantity <= 0 or unit_price < 0:
+                    raise ValueError("некоректні текстові або числові дані")
+                prepared.append((sold_at, material_id, manager, customer, quantity, unit_price))
+            except (KeyError, TypeError, ValueError) as error:
+                errors.append(f"рядок {line_number}: {error}")
+        if prepared:
+            conn.executemany(
+                "INSERT INTO sales(sold_at, material_id, manager, customer, quantity, unit_price) VALUES (?, ?, ?, ?, ?, ?)",
+                prepared,
+            )
+    return {"inserted": len(prepared), "skipped": len(errors), "errors": errors}

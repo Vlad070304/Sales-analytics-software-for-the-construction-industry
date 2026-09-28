@@ -3,10 +3,10 @@ from __future__ import annotations
 
 import tkinter as tk
 from datetime import date
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, ttk
 
 from app.analytics import demand_forecast, manager_scores, shortage_risk
-from app.database import add_sale, connection, fetch_materials, initialize
+from app.database import add_sale, connection, fetch_materials, import_sales_csv, initialize
 
 
 class BuildSalesApp(tk.Tk):
@@ -34,7 +34,10 @@ class BuildSalesApp(tk.Tk):
         tk.Label(header, text="АНАЛІТИЧНА СИСТЕМА", fg="#c7e56c", bg="#17372c", font=("Segoe UI", 9, "bold")).pack(anchor="w")
         tk.Label(header, text="BuildSales Insight", fg="white", bg="#17372c", font=("Georgia", 25, "bold")).pack(anchor="w")
         tk.Label(header, text="Продажі будівельних матеріалів · локальний режим", fg="#d3dfd9", bg="#17372c", font=("Segoe UI", 10)).pack(anchor="w")
-        ttk.Button(header, text="+ Додати продаж", style="Accent.TButton", command=self.open_sale_form).pack(anchor="e", side="right", pady=-50)
+        actions = tk.Frame(header, bg="#17372c")
+        actions.pack(anchor="e", side="right", pady=-50)
+        ttk.Button(actions, text="Імпортувати CSV", command=self.import_csv).pack(side="left", padx=(0, 8))
+        ttk.Button(actions, text="+ Додати продаж", style="Accent.TButton", command=self.open_sale_form).pack(side="left")
         body = tk.Frame(self, bg="#f7f8f3", padx=24, pady=20)
         body.pack(fill="both", expand=True)
         self.kpi_frame = tk.Frame(body, bg="#f7f8f3")
@@ -61,7 +64,7 @@ class BuildSalesApp(tk.Tk):
         manager_frame.pack(side="left", fill="both", expand=True, padx=(7, 0))
         self.risk_table = ttk.Treeview(risk_frame, columns=("risk", "level", "stock"), show="headings")
         self.manager_table = ttk.Treeview(manager_frame, columns=("score", "deals", "revenue"), show="headings")
-        for table, headings in ((self.risk_table, [("risk", "SRI"), ("level", "Рівень"), ("stock", "Запас")]), (self.manager_table, [("score", "Індекс"), ("deals", "Угод"), ("revenue", "Виручка, ₴")])):
+        for table, headings in ((self.risk_table, [("risk", "CPRI"), ("level", "Рівень"), ("stock", "Запас")]), (self.manager_table, [("score", "Індекс"), ("deals", "Угод"), ("revenue", "Виручка, ₴")])):
             for key, title in headings: table.heading(key, text=title); table.column(key, anchor="center", width=95)
             table.pack(fill="both", expand=True)
 
@@ -137,6 +140,21 @@ class BuildSalesApp(tk.Tk):
                 window.destroy(); self.refresh()
             except (ValueError, StopIteration) as error: messagebox.showerror("Помилка введення", str(error), parent=window)
         ttk.Button(form, text="Зберегти продаж", style="Accent.TButton", command=save).pack(fill="x", pady=(16, 0))
+
+    def import_csv(self) -> None:
+        path = filedialog.askopenfilename(
+            title="Оберіть CSV-файл продажів", filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+        )
+        if not path:
+            return
+        try:
+            report = import_sales_csv(path)
+            self.refresh()
+            details = "\n".join(report["errors"][:5])
+            extra = f"\n\nНе імпортовано: {report['skipped']}\n{details}" if report["skipped"] else ""
+            messagebox.showinfo("Імпорт завершено", f"Імпортовано записів: {report['inserted']}.{extra}", parent=self)
+        except (OSError, ValueError) as error:
+            messagebox.showerror("Помилка імпорту", str(error), parent=self)
 
 
 def main() -> None:
