@@ -6,7 +6,7 @@ from datetime import date
 from tkinter import filedialog, messagebox, ttk
 
 from app.analytics import demand_forecast, manager_scores, shortage_risk
-from app.database import add_sale, connection, fetch_materials, import_sales_csv, initialize
+from app.database import add_material, add_sale, connection, delete_material, fetch_materials, import_sales_csv, initialize, update_material
 
 
 class BuildSalesApp(tk.Tk):
@@ -36,6 +36,7 @@ class BuildSalesApp(tk.Tk):
         tk.Label(header, text="Продажі будівельних матеріалів · локальний режим", fg="#d3dfd9", bg="#17372c", font=("Segoe UI", 10)).pack(anchor="w")
         actions = tk.Frame(header, bg="#17372c")
         actions.pack(anchor="e", side="right", pady=-50)
+        ttk.Button(actions, text="Матеріали", command=self.open_materials).pack(side="left", padx=(0, 8))
         ttk.Button(actions, text="Імпортувати CSV", command=self.import_csv).pack(side="left", padx=(0, 8))
         ttk.Button(actions, text="+ Додати продаж", style="Accent.TButton", command=self.open_sale_form).pack(side="left")
         body = tk.Frame(self, bg="#f7f8f3", padx=24, pady=20)
@@ -140,6 +141,75 @@ class BuildSalesApp(tk.Tk):
                 window.destroy(); self.refresh()
             except (ValueError, StopIteration) as error: messagebox.showerror("Помилка введення", str(error), parent=window)
         ttk.Button(form, text="Зберегти продаж", style="Accent.TButton", command=save).pack(fill="x", pady=(16, 0))
+
+    def open_materials(self) -> None:
+        window = tk.Toplevel(self)
+        window.title("Довідник матеріалів")
+        window.geometry("800x430")
+        window.transient(self)
+        container = tk.Frame(window, padx=18, pady=18)
+        container.pack(fill="both", expand=True)
+        tk.Label(container, text="Матеріали та параметри постачання", font=("Segoe UI", 15, "bold")).pack(anchor="w")
+        tk.Label(container, text="Матеріали з історією продажів не можна видалити, щоб не втратити аналітичні дані.", fg="#53645b").pack(anchor="w", pady=(3, 12))
+        columns = ("category", "unit", "stock", "lead_time")
+        table = ttk.Treeview(container, columns=columns, show="tree headings", selectmode="browse")
+        table.heading("#0", text="Назва"); table.column("#0", width=250)
+        for key, title, width in [("category", "Категорія", 180), ("unit", "Од.", 80), ("stock", "Запас", 100), ("lead_time", "Постачання, дн.", 130)]:
+            table.heading(key, text=title); table.column(key, width=width, anchor="center")
+        table.pack(fill="both", expand=True)
+
+        def reload_table() -> None:
+            table.delete(*table.get_children())
+            for material in fetch_materials():
+                table.insert("", "end", iid=str(material["id"]), text=material["name"], values=(material["category"], material["unit"], material["stock"], material["lead_time_days"]))
+            self.refresh()
+
+        def selected_material() -> dict | None:
+            selected = table.selection()
+            if not selected:
+                messagebox.showwarning("Оберіть матеріал", "Спочатку оберіть матеріал у таблиці.", parent=window)
+                return None
+            return next((item for item in fetch_materials() if item["id"] == int(selected[0])), None)
+
+        def open_editor(material: dict | None = None) -> None:
+            editor = tk.Toplevel(window)
+            editor.title("Новий матеріал" if material is None else "Редагувати матеріал")
+            editor.transient(window); editor.grab_set(); editor.resizable(False, False)
+            form = tk.Frame(editor, padx=22, pady=18); form.pack()
+            fields = [("Назва", "name"), ("Категорія", "category"), ("Одиниця виміру", "unit"), ("Поточний запас", "stock"), ("Строк постачання, днів", "lead_time_days")]
+            entries: dict[str, ttk.Entry] = {}
+            for title, key in fields:
+                tk.Label(form, text=title, anchor="w").pack(fill="x", pady=(6, 0))
+                entry = ttk.Entry(form, width=42)
+                if material is not None:
+                    entry.insert(0, str(material[key]))
+                entry.pack(fill="x"); entries[key] = entry
+            def save() -> None:
+                payload = {key: entry.get() for key, entry in entries.items()}
+                try:
+                    if material is None:
+                        add_material(payload)
+                    else:
+                        update_material(material["id"], payload)
+                    editor.destroy(); reload_table()
+                except ValueError as error:
+                    messagebox.showerror("Помилка збереження", str(error), parent=editor)
+            ttk.Button(form, text="Зберегти", style="Accent.TButton", command=save).pack(fill="x", pady=(14, 0))
+
+        controls = tk.Frame(container)
+        controls.pack(fill="x", pady=(12, 0))
+        ttk.Button(controls, text="+ Новий", command=lambda: open_editor()).pack(side="left")
+        ttk.Button(controls, text="Редагувати", command=lambda: (lambda item: open_editor(item) if item else None)(selected_material())).pack(side="left", padx=8)
+        def remove() -> None:
+            material = selected_material()
+            if material is None or not messagebox.askyesno("Підтвердження", f"Видалити «{material['name']}»?", parent=window):
+                return
+            try:
+                delete_material(material["id"]); reload_table()
+            except ValueError as error:
+                messagebox.showerror("Неможливо видалити", str(error), parent=window)
+        ttk.Button(controls, text="Видалити", command=remove).pack(side="left")
+        reload_table()
 
     def import_csv(self) -> None:
         path = filedialog.askopenfilename(
