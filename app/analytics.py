@@ -42,7 +42,7 @@ def demand_forecast(monthly: list[tuple[str, float]], horizon: int = 3) -> list[
 def shortage_risk(monthly_values: list[float], stock: float, lead_time_days: int, next_forecast: float | None = None) -> dict:
     """Calculate seasonality-adaptive Construction Procurement Risk Index (CPRI)."""
     if not monthly_values:
-        return {"score": 0, "level": "низький", "demand_component": 0, "volatility_component": 0}
+        return {"score": 0, "level": "низький", "demand_component": 0, "volatility_component": 0, "lead_component": 0, "seasonality_component": 0}
     mean = sum(monthly_values) / len(monthly_values)
     deviation = sqrt(sum((v - mean) ** 2 for v in monthly_values) / len(monthly_values))
     expected_lead_demand = (next_forecast if next_forecast is not None else mean) * lead_time_days / 30
@@ -52,7 +52,7 @@ def shortage_risk(monthly_values: list[float], stock: float, lead_time_days: int
     seasonality = min(1, max(0, (next_forecast or mean) / max(mean, 1) - 1))
     score = round(100 * (0.40 * demand + 0.25 * volatility + 0.20 * lead + 0.15 * seasonality), 1)
     level = "високий" if score >= 70 else "середній" if score >= 40 else "низький"
-    return {"score": score, "level": level, "demand_component": round(demand, 3), "volatility_component": round(volatility, 3), "seasonality_component": round(seasonality, 3)}
+    return {"score": score, "level": level, "demand_component": round(demand, 3), "volatility_component": round(volatility, 3), "lead_component": round(lead, 3), "seasonality_component": round(seasonality, 3)}
 
 
 def manager_scores(rows: list[dict]) -> list[dict]:

@@ -16,6 +16,11 @@ class BuildSalesApp(tk.Tk):
         self.geometry("1180x760")
         self.minsize(900, 600)
         self.configure(bg="#f7f8f3")
+        self.filter_start = tk.StringVar()
+        self.filter_end = tk.StringVar()
+        self.filter_material = tk.StringVar(value="Усі матеріали")
+        self.filter_manager = tk.StringVar(value="Усі менеджери")
+        self.risk_details: dict[str, dict] = {}
         self._style()
         self._build()
         self.refresh()
@@ -41,6 +46,7 @@ class BuildSalesApp(tk.Tk):
         ttk.Button(actions, text="+ Додати продаж", style="Accent.TButton", command=self.open_sale_form).pack(side="left")
         body = tk.Frame(self, bg="#f7f8f3", padx=24, pady=20)
         body.pack(fill="both", expand=True)
+        self._filter_bar(body)
         self.kpi_frame = tk.Frame(body, bg="#f7f8f3")
         self.kpi_frame.pack(fill="x", pady=(0, 14))
         notebook = ttk.Notebook(body)
@@ -51,6 +57,24 @@ class BuildSalesApp(tk.Tk):
         notebook.add(forecast, text="  Прогноз попиту  ")
         self._overview(overview)
         self._forecast(forecast)
+
+    def _filter_bar(self, parent: tk.Frame) -> None:
+        filters = ttk.LabelFrame(parent, text=" Фільтри аналітики ", padding=10)
+        filters.pack(fill="x", pady=(0, 14))
+        for column, (title, variable, width) in enumerate([
+            ("Дата від (YYYY-MM-DD)", self.filter_start, 15),
+            ("Дата до (YYYY-MM-DD)", self.filter_end, 15),
+        ]):
+            tk.Label(filters, text=title).grid(row=0, column=column * 2, sticky="w", padx=(0, 5))
+            ttk.Entry(filters, textvariable=variable, width=width).grid(row=1, column=column * 2, sticky="w", padx=(0, 12))
+        tk.Label(filters, text="Матеріал").grid(row=0, column=4, sticky="w", padx=(0, 5))
+        self.material_filter_combo = ttk.Combobox(filters, textvariable=self.filter_material, state="readonly", width=23)
+        self.material_filter_combo.grid(row=1, column=4, sticky="w", padx=(0, 12))
+        tk.Label(filters, text="Менеджер").grid(row=0, column=5, sticky="w", padx=(0, 5))
+        self.manager_filter_combo = ttk.Combobox(filters, textvariable=self.filter_manager, state="readonly", width=21)
+        self.manager_filter_combo.grid(row=1, column=5, sticky="w", padx=(0, 12))
+        ttk.Button(filters, text="Застосувати", style="Accent.TButton", command=self.apply_filters).grid(row=1, column=6, sticky="w")
+        ttk.Button(filters, text="Скинути", command=self.reset_filters).grid(row=1, column=7, sticky="w", padx=(8, 0))
 
     def _overview(self, parent: tk.Frame) -> None:
         frame = ttk.LabelFrame(parent, text=" Місячна виручка, ₴ ", padding=14)
@@ -63,11 +87,13 @@ class BuildSalesApp(tk.Tk):
         risk_frame.pack(side="left", fill="both", expand=True, padx=(0, 7))
         manager_frame = ttk.LabelFrame(lower, text=" Ефективність менеджерів ", padding=10)
         manager_frame.pack(side="left", fill="both", expand=True, padx=(7, 0))
-        self.risk_table = ttk.Treeview(risk_frame, columns=("risk", "level", "stock"), show="headings")
+        self.risk_table = ttk.Treeview(risk_frame, columns=("risk", "level", "stock"), show="tree headings")
+        self.risk_table.heading("#0", text="Матеріал"); self.risk_table.column("#0", width=175)
         self.manager_table = ttk.Treeview(manager_frame, columns=("score", "deals", "revenue"), show="headings")
         for table, headings in ((self.risk_table, [("risk", "CPRI"), ("level", "Рівень"), ("stock", "Запас")]), (self.manager_table, [("score", "Індекс"), ("deals", "Угод"), ("revenue", "Виручка, ₴")])):
             for key, title in headings: table.heading(key, text=title); table.column(key, anchor="center", width=95)
             table.pack(fill="both", expand=True)
+        self.risk_table.bind("<Double-1>", self.open_cpri_explanation)
 
     def _forecast(self, parent: tk.Frame) -> None:
         tk.Label(parent, text="Прогноз розраховано методом трендово-сезонної декомпозиції на 3 місяці.", bg="#f7f8f3", fg="#53645b", font=("Segoe UI", 10)).pack(anchor="w", pady=(0, 10))
@@ -80,22 +106,64 @@ class BuildSalesApp(tk.Tk):
         self.forecast_table.pack(fill="both", expand=True)
 
     def metrics(self) -> tuple[dict, list[dict]]:
+        clauses: list[str] = []
+        params: list[object] = []
+        material_names = {item["name"]: item for item in fetch_materials()}
+        selected_material = material_names.get(self.filter_material.get())
+        if self.filter_start.get():
+            clauses.append("sold_at >= ?"); params.append(self.filter_start.get())
+        if self.filter_end.get():
+            clauses.append("sold_at <= ?"); params.append(self.filter_end.get())
+        if selected_material:
+            clauses.append("material_id = ?"); params.append(selected_material["id"])
+        if self.filter_manager.get() != "Усі менеджери":
+            clauses.append("manager = ?"); params.append(self.filter_manager.get())
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
         with connection() as conn:
-            sales = [dict(row) for row in conn.execute("SELECT * FROM sales ORDER BY sold_at")]
+            sales = [dict(row) for row in conn.execute(f"SELECT * FROM sales{where} ORDER BY sold_at", params)]
         monthly: dict[str, float] = {}
         for row in sales:
             period = row["sold_at"][:7]
             monthly[period] = monthly.get(period, 0) + row["quantity"] * row["unit_price"]
         materials = []
-        for material in fetch_materials():
+        material_scope = [selected_material] if selected_material else list(material_names.values())
+        for material in material_scope:
+            material_clauses = ["material_id = ?", *clauses]
+            material_params = [material["id"], *params]
             with connection() as conn:
-                points = conn.execute("SELECT substr(sold_at, 1, 7) period, SUM(quantity) qty FROM sales WHERE material_id=? GROUP BY period ORDER BY period", (material["id"],)).fetchall()
+                points = conn.execute(f"SELECT substr(sold_at, 1, 7) period, SUM(quantity) qty FROM sales WHERE {' AND '.join(material_clauses)} GROUP BY period ORDER BY period", material_params).fetchall()
             series = [(row["period"], row["qty"]) for row in points]
             forecast = demand_forecast(series)
             materials.append({**material, "forecast": forecast, "risk": shortage_risk([v for _, v in series][-12:], material["stock"], material["lead_time_days"], forecast[0]["quantity"] if forecast else None)})
         return {"sales": sales, "monthly": monthly, "materials": materials, "managers": manager_scores(sales)}, materials
 
+    def apply_filters(self) -> None:
+        try:
+            start = date.fromisoformat(self.filter_start.get()) if self.filter_start.get() else None
+            end = date.fromisoformat(self.filter_end.get()) if self.filter_end.get() else None
+            if start and end and start > end:
+                raise ValueError("Початкова дата не може бути пізніше кінцевої.")
+            self.refresh()
+        except ValueError as error:
+            messagebox.showerror("Некоректний період", str(error), parent=self)
+
+    def reset_filters(self) -> None:
+        self.filter_start.set(""); self.filter_end.set("")
+        self.filter_material.set("Усі матеріали"); self.filter_manager.set("Усі менеджери")
+        self.refresh()
+
+    def refresh_filter_values(self) -> None:
+        material_values = ["Усі матеріали", *[item["name"] for item in fetch_materials()]]
+        with connection() as conn:
+            managers = [row[0] for row in conn.execute("SELECT DISTINCT manager FROM sales ORDER BY manager")]
+        manager_values = ["Усі менеджери", *managers]
+        self.material_filter_combo["values"] = material_values
+        self.manager_filter_combo["values"] = manager_values
+        if self.filter_material.get() not in material_values: self.filter_material.set("Усі матеріали")
+        if self.filter_manager.get() not in manager_values: self.filter_manager.set("Усі менеджери")
+
     def refresh(self) -> None:
+        self.refresh_filter_values()
         data, materials = self.metrics()
         for child in self.kpi_frame.winfo_children(): child.destroy()
         revenue = sum(s["quantity"] * s["unit_price"] for s in data["sales"])
@@ -108,12 +176,40 @@ class BuildSalesApp(tk.Tk):
         self.draw_chart(data["monthly"])
         for table in (self.risk_table, self.manager_table, self.forecast_table):
             table.delete(*table.get_children())
+        self.risk_details = {}
         for m in materials:
-            self.risk_table.insert("", "end", text=m["name"], values=(m["risk"]["score"], m["risk"]["level"], f"{m['stock']} {m['unit']}"))
+            item_id = str(m["id"])
+            self.risk_details[item_id] = m
+            self.risk_table.insert("", "end", iid=item_id, text=m["name"], values=(m["risk"]["score"], m["risk"]["level"], f"{m['stock']} {m['unit']}"))
             forecast = [f"{point['period']}: {point['quantity']}" for point in m["forecast"]]
             self.forecast_table.insert("", "end", text=m["name"], values=(m["category"], f"{m['stock']} {m['unit']}", m["risk"]["score"], *forecast))
         for m in data["managers"]:
             self.manager_table.insert("", "end", text=m["manager"], values=(m["score"], m["deals"], f"{m['revenue']:,.0f}"))
+
+    def open_cpri_explanation(self, _event: object = None) -> None:
+        selection = self.risk_table.selection()
+        if not selection:
+            return
+        material = self.risk_details.get(selection[0])
+        if material is None:
+            return
+        risk = material["risk"]
+        window = tk.Toplevel(self)
+        window.title(f"Пояснення CPRI — {material['name']}")
+        window.transient(self); window.resizable(False, False)
+        frame = tk.Frame(window, padx=24, pady=20); frame.pack()
+        tk.Label(frame, text=material["name"], font=("Segoe UI", 16, "bold")).pack(anchor="w")
+        tk.Label(frame, text=f"CPRI: {risk['score']} · {risk['level']} пріоритет закупівлі", fg="#176b4c", font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(4, 14))
+        tk.Label(frame, text="Формула: 100 × (0.40D + 0.25V + 0.20L + 0.15S)", fg="#53645b").pack(anchor="w", pady=(0, 8))
+        table = ttk.Treeview(frame, columns=("value", "weight", "contribution"), show="headings", height=4)
+        for key, title, width in [("value", "Нормоване значення", 160), ("weight", "Вага", 80), ("contribution", "Внесок у CPRI", 130)]:
+            table.heading(key, text=title); table.column(key, width=width, anchor="center")
+        components = [("D — попит на строк постачання", risk["demand_component"], .40), ("V — нестабільність попиту", risk["volatility_component"], .25), ("L — строк постачання", risk["lead_component"], .20), ("S — сезонне прискорення", risk["seasonality_component"], .15)]
+        for label, value, weight in components:
+            table.insert("", "end", values=(f"{value:.3f}", f"{weight:.0%}", f"{value * weight * 100:.1f}"), text=label)
+        table["show"] = "tree headings"; table.heading("#0", text="Компонент"); table.column("#0", width=220)
+        table.pack(fill="x")
+        tk.Label(frame, text="Нормовані значення лежать у межах 0–1. Більший внесок означає вищий пріоритет поповнення запасу.", wraplength=590, justify="left", fg="#53645b").pack(anchor="w", pady=(12, 0))
 
     def draw_chart(self, monthly: dict[str, float]) -> None:
         self.chart.delete("all")
