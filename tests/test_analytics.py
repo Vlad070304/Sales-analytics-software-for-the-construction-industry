@@ -2,6 +2,7 @@ import unittest
 
 from app.analytics import (
     CPRI_WEIGHTS,
+    calibrate_cpri_weights,
     demand_forecast,
     forecast_accuracy,
     linear_trend,
@@ -104,6 +105,33 @@ class AnalyticsTests(unittest.TestCase):
         ):
             with self.subTest(weights=weights), self.assertRaises(ValueError):
                 validate_weights(weights)
+
+    def test_cpri_calibration_returns_valid_non_worse_recommendation(self):
+        scenarios = [
+            {
+                "values": [20.0, 22.0, 24.0, 26.0, 28.0, 30.0],
+                "stock": 30.0,
+                "lead_time_days": 30,
+                "forecast": 30.0,
+                "actual": 40.0,
+            },
+            {
+                "values": [10.0, 12.0, 14.0, 16.0, 18.0, 20.0],
+                "stock": 100.0,
+                "lead_time_days": 10,
+                "forecast": 20.0,
+                "actual": 10.0,
+            },
+        ]
+        result = calibrate_cpri_weights(scenarios)
+        self.assertEqual(result["observations"], 2)
+        self.assertEqual(sum(result["weights"].values()), 1.0)
+        self.assertLessEqual(result["mae"], result["expert_mae"])
+
+    def test_cpri_calibration_handles_missing_history(self):
+        result = calibrate_cpri_weights([])
+        self.assertIsNone(result["weights"])
+        self.assertEqual(result["observations"], 0)
 
 
 if __name__ == "__main__":

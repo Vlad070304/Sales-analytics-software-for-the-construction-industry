@@ -8,6 +8,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from app.analytics import (
     CPRI_WEIGHTS,
+    calibrate_cpri_weights,
     demand_forecast,
     forecast_accuracy,
     manager_scores,
@@ -707,6 +708,35 @@ class BuildSalesApp(tk.Tk):
             entry.bind("<KeyRelease>", show_total)
         show_total()
 
+        def calibrate() -> None:
+            """Offer weights calibrated on the stored sales history."""
+            recommendation = self._cpri_calibration_recommendation()
+            if recommendation["weights"] is None:
+                messagebox.showinfo(
+                    "Недостатньо даних",
+                    "Для калібрування потрібні щонайменше 7 місячних значень продажів "
+                    "хоча б для одного матеріалу.",
+                    parent=window,
+                )
+                return
+            weights = recommendation["weights"]
+            for key, entry in entries.items():
+                entry.delete(0, tk.END)
+                entry.insert(0, f"{weights[key]:.1f}")
+            show_total()
+            improvement = recommendation["improvement_pct"]
+            improvement_text = "—" if improvement is None else f"{improvement:+.2f}%"
+            messagebox.showinfo(
+                "Рекомендація калібрування CPRI",
+                "Ваги підготовлено у полях, але ще не збережено.\n\n"
+                f"Ретроспективних спостережень: {recommendation['observations']}\n"
+                f"Похибка експертних ваг: {recommendation['expert_mae']:.2f} в.п.\n"
+                f"Похибка рекомендації: {recommendation['mae']:.2f} в.п.\n"
+                f"Зміна похибки: {improvement_text}\n\n"
+                "Перевірте значення та натисніть «Зберегти», щоб застосувати їх.",
+                parent=window,
+            )
+
         def restore_defaults() -> None:
             for key, entry in entries.items():
                 entry.delete(0, tk.END)
@@ -724,6 +754,7 @@ class BuildSalesApp(tk.Tk):
 
         controls = tk.Frame(frame)
         controls.pack(fill="x", pady=(16, 0))
+        ttk.Button(controls, text="Калібрувати за історією", command=calibrate).pack(side="left")
         ttk.Button(controls, text="Стандартні ваги", command=restore_defaults).pack(side="left")
         ttk.Button(controls, text="Скасувати", command=window.destroy).pack(side="right")
         ttk.Button(
@@ -732,6 +763,35 @@ class BuildSalesApp(tk.Tk):
             style="Accent.TButton",
             command=save,
         ).pack(side="right", padx=(0, 8))
+
+    def _cpri_calibration_recommendation(self) -> dict:
+        """Build historical one-period CPRI calibration scenarios from sales data."""
+        scenarios: list[dict] = []
+        with connection() as conn:
+            rows = conn.execute(
+                "SELECT material_id, substr(sold_at, 1, 7) AS period, SUM(quantity) AS quantity "
+                "FROM sales GROUP BY material_id, period ORDER BY material_id, period"
+            ).fetchall()
+        series_by_material: dict[int, list[tuple[str, float]]] = {}
+        for row in rows:
+            series_by_material.setdefault(row["material_id"], []).append(
+                (row["period"], float(row["quantity"]))
+            )
+        for material in fetch_materials():
+            series = series_by_material.get(material["id"], [])
+            for point in range(6, len(series)):
+                history = series[:point]
+                forecast = demand_forecast(history, horizon=1)[0]["quantity"]
+                scenarios.append(
+                    {
+                        "values": [value for _, value in history][-12:],
+                        "stock": material["stock"],
+                        "lead_time_days": material["lead_time_days"],
+                        "forecast": forecast,
+                        "actual": series[point][1],
+                    }
+                )
+        return calibrate_cpri_weights(scenarios)
 
     def draw_chart(self, monthly: dict[str, float]) -> None:
         """Draw the monthly-revenue bar chart on the canvas."""

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from math import sqrt
+from typing import Iterator
 
 
 def linear_trend(values: list[float]) -> tuple[float, float]:
@@ -122,6 +123,83 @@ CPRI_WEIGHTS: dict[str, float] = {
     "lead": 0.20,
     "seasonality": 0.15,
 }
+
+
+def _weight_candidates(step: float = 0.1) -> Iterator[dict[str, float]]:
+    """Yield non-negative four-component weight sets that sum to one."""
+    steps = round(1 / step)
+    if steps < 1 or abs(steps * step - 1) > 1e-9:
+        raise ValueError("Крок калібрування має ділити 1 без залишку.")
+    keys = tuple(CPRI_WEIGHTS)
+    for demand in range(steps + 1):
+        for volatility in range(steps - demand + 1):
+            for lead in range(steps - demand - volatility + 1):
+                seasonality = steps - demand - volatility - lead
+                values = (demand, volatility, lead, seasonality)
+                yield {key: value / steps for key, value in zip(keys, values)}
+
+
+def calibrate_cpri_weights(scenarios: list[dict], step: float = 0.1) -> dict:
+    """Calibrate explainable CPRI weights against one-period historical demand.
+
+    Each scenario must contain historical ``values``, current ``stock``,
+    ``lead_time_days``, the model's ``forecast`` and the next observed demand
+    in ``actual``. The target is the observed stock-pressure ratio during lead
+    time. The function returns a recommendation only; it never persists it.
+    """
+    if not scenarios:
+        return {
+            "weights": None,
+            "observations": 0,
+            "mae": None,
+            "expert_mae": None,
+            "improvement_pct": None,
+        }
+
+    def score_error(weights: dict[str, float]) -> float:
+        errors = []
+        for scenario in scenarios:
+            estimated = (
+                shortage_risk(
+                    scenario["values"],
+                    scenario["stock"],
+                    scenario["lead_time_days"],
+                    scenario["forecast"],
+                    weights,
+                )["score"]
+                / 100
+            )
+            observed_pressure = min(
+                1,
+                scenario["actual"] * scenario["lead_time_days"] / 30 / max(scenario["stock"], 1),
+            )
+            errors.append(abs(estimated - observed_pressure))
+        return sum(errors) / len(errors)
+
+    expert_mae = score_error(CPRI_WEIGHTS)
+    best_weights = dict(CPRI_WEIGHTS)
+    best_mae = expert_mae
+    for candidate in _weight_candidates(step):
+        candidate_mae = score_error(candidate)
+        distance_from_expert = sum(
+            abs(candidate[key] - expert_value) for key, expert_value in CPRI_WEIGHTS.items()
+        )
+        best_distance = sum(
+            abs(best_weights[key] - expert_value) for key, expert_value in CPRI_WEIGHTS.items()
+        )
+        if candidate_mae < best_mae - 1e-9 or (
+            abs(candidate_mae - best_mae) <= 1e-9 and distance_from_expert < best_distance
+        ):
+            best_weights = candidate
+            best_mae = candidate_mae
+    improvement = (expert_mae - best_mae) / expert_mae * 100 if expert_mae else None
+    return {
+        "weights": best_weights,
+        "observations": len(scenarios),
+        "mae": round(best_mae * 100, 2),
+        "expert_mae": round(expert_mae * 100, 2),
+        "improvement_pct": round(improvement, 2) if improvement is not None else None,
+    }
 
 
 def validate_weights(weights: dict[str, float]) -> dict[str, float]:
