@@ -20,6 +20,7 @@ python -m app.desktop
 ```
 
 Формат імпортного CSV наведено в [docs/import-format.md](docs/import-format.md).
+Заплановані напрями розвитку — у [docs/improvement-roadmap.md](docs/improvement-roadmap.md).
 
 Відкриється вікно застосунку. Під час першого запуску буде створено SQLite-базу з демонстраційними даними.
 
