@@ -29,6 +29,7 @@ from app.database import (
     save_cpri_weights,
     update_material,
 )
+from app.export import export_sales_csv
 
 
 class BuildSalesApp(tk.Tk):
@@ -121,6 +122,9 @@ class BuildSalesApp(tk.Tk):
             side="left", padx=(0, 8)
         )
         ttk.Button(actions, text="Матеріали", command=self.open_materials).pack(
+            side="left", padx=(0, 8)
+        )
+        ttk.Button(actions, text="Експортувати CSV", command=self.export_csv).pack(
             side="left", padx=(0, 8)
         )
         ttk.Button(actions, text="Імпортувати CSV", command=self.import_csv).pack(
@@ -729,6 +733,41 @@ class BuildSalesApp(tk.Tk):
         ttk.Button(form, text="Зберегти продаж", style="Accent.TButton", command=save).pack(
             fill="x", pady=(16, 0)
         )
+
+    def export_csv(self) -> None:
+        """Save the active, filtered sales dataset to a local CSV file."""
+        path = filedialog.asksaveasfilename(
+            title="Зберегти експорт продажів",
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv")],
+            initialfile="buildsales-export.csv",
+        )
+        if not path:
+            return
+        data, materials = self.metrics()
+        material_map = {material["id"]: material for material in materials}
+        rows = []
+        for sale in data["sales"]:
+            material = material_map.get(sale["material_id"])
+            if material is None:
+                continue
+            rows.append(
+                {
+                    **sale,
+                    "material": material["name"],
+                    "category": material["category"],
+                    "revenue": round(sale["quantity"] * sale["unit_price"], 2),
+                }
+            )
+        try:
+            destination = export_sales_csv(rows, path)
+            messagebox.showinfo(
+                "Експорт завершено",
+                f"Експортовано записів: {len(rows)}.\nФайл: {destination}",
+                parent=self,
+            )
+        except OSError as error:
+            messagebox.showerror("Помилка експорту", str(error), parent=self)
 
     def open_materials(self) -> None:
         """Open the material directory and its create, update, and delete actions."""
