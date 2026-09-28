@@ -68,6 +68,52 @@ def fetch_materials() -> list[dict]:
         return [dict(row) for row in conn.execute("SELECT * FROM materials ORDER BY name")]
 
 
+def validate_material(payload: dict) -> tuple[str, str, str, float, int]:
+    """Normalize and validate a material record before persistence."""
+    name = str(payload.get("name", "")).strip()
+    category = str(payload.get("category", "")).strip()
+    unit = str(payload.get("unit", "")).strip()
+    if not name or not category or not unit:
+        raise ValueError("Назва, категорія та одиниця виміру є обов'язковими.")
+    try:
+        stock = float(payload.get("stock"))
+        lead_time_days = int(payload.get("lead_time_days"))
+    except (TypeError, ValueError) as error:
+        raise ValueError("Запас і строк постачання мають бути числами.") from error
+    if stock < 0 or lead_time_days < 0:
+        raise ValueError("Запас і строк постачання не можуть бути від'ємними.")
+    return name, category, unit, stock, lead_time_days
+
+
+def add_material(payload: dict) -> int:
+    values = validate_material(payload)
+    try:
+        with connection() as conn:
+            return conn.execute(
+                "INSERT INTO materials(name, category, unit, stock, lead_time_days) VALUES (?, ?, ?, ?, ?)", values
+            ).lastrowid
+    except sqlite3.IntegrityError as error:
+        raise ValueError("Матеріал із такою назвою вже існує.") from error
+
+
+def update_material(material_id: int, payload: dict) -> None:
+    values = validate_material(payload)
+    try:
+        with connection() as conn:
+            if conn.execute("UPDATE materials SET name=?, category=?, unit=?, stock=?, lead_time_days=? WHERE id=?", (*values, material_id)).rowcount == 0:
+                raise ValueError("Матеріал не знайдено.")
+    except sqlite3.IntegrityError as error:
+        raise ValueError("Матеріал із такою назвою вже існує.") from error
+
+
+def delete_material(material_id: int) -> None:
+    with connection() as conn:
+        if conn.execute("SELECT COUNT(*) FROM sales WHERE material_id=?", (material_id,)).fetchone()[0]:
+            raise ValueError("Неможливо видалити матеріал, для якого вже є продажі.")
+        if conn.execute("DELETE FROM materials WHERE id=?", (material_id,)).rowcount == 0:
+            raise ValueError("Матеріал не знайдено.")
+
+
 def add_sale(payload: dict) -> int:
     required = ("sold_at", "material_id", "manager", "customer", "quantity", "unit_price")
     if not all(payload.get(field) not in (None, "") for field in required):
