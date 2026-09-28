@@ -1,0 +1,1 @@
+"""BuildSales Insight application package."""
