@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from app.export import export_sales_csv
+from app.export import anonymize_sales_rows, export_sales_csv
 
 
 class NonClosingStringIO(io.StringIO):
@@ -36,3 +36,17 @@ class CsvExportTests(unittest.TestCase):
         self.assertEqual(result, Path("report.csv"))
         self.assertIn("Матеріал", output.getvalue())
         self.assertIn("Цемент М500", output.getvalue())
+
+    def test_anonymization_preserves_relationships_without_source_names(self) -> None:
+        """Aliases are stable while the export input remains unchanged."""
+        rows = [
+            {"manager": "Ірина Коваль", "customer": "ТОВ Будмонтаж", "quantity": 1},
+            {"manager": "Ірина Коваль", "customer": "ТОВ Будмонтаж", "quantity": 2},
+            {"manager": "Олег Марченко", "customer": "ПП Рембуд", "quantity": 3},
+        ]
+        result = anonymize_sales_rows(rows)
+        self.assertEqual(result[0]["manager"], result[1]["manager"])
+        self.assertEqual(result[0]["customer"], result[1]["customer"])
+        self.assertNotEqual(result[0]["manager"], result[2]["manager"])
+        self.assertNotIn("Ірина Коваль", {row["manager"] for row in result})
+        self.assertEqual(rows[0]["customer"], "ТОВ Будмонтаж")

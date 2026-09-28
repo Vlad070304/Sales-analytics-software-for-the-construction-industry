@@ -32,7 +32,7 @@ from app.database import (
     save_cpri_weights,
     update_material,
 )
-from app.export import export_sales_csv
+from app.export import anonymize_sales_rows, export_sales_csv
 
 
 class BuildSalesApp(tk.Tk):
@@ -941,11 +941,23 @@ class BuildSalesApp(tk.Tk):
 
     def export_csv(self) -> None:
         """Save the active, filtered sales dataset to a local CSV file."""
+        anonymize = messagebox.askyesnocancel(
+            "Захист персональних даних",
+            "Експортувати знеособлені дані?\n\n"
+            "«Так» замінить імена менеджерів та клієнтів стабільними псевдонімами "
+            "лише у файлі експорту.\n"
+            "«Ні» збереже вихідні назви. «Скасувати» припинить експорт.",
+            parent=self,
+        )
+        if anonymize is None:
+            return
         path = filedialog.asksaveasfilename(
             title="Зберегти експорт продажів",
             defaultextension=".csv",
             filetypes=[("CSV files", "*.csv")],
-            initialfile="buildsales-export.csv",
+            initialfile="buildsales-anonymized-export.csv"
+            if anonymize
+            else "buildsales-export.csv",
         )
         if not path:
             return
@@ -964,11 +976,15 @@ class BuildSalesApp(tk.Tk):
                     "revenue": round(sale["quantity"] * sale["unit_price"], 2),
                 }
             )
+        if anonymize:
+            rows = anonymize_sales_rows(rows)
         try:
             destination = export_sales_csv(rows, path)
             messagebox.showinfo(
                 "Експорт завершено",
-                f"Експортовано записів: {len(rows)}.\nФайл: {destination}",
+                f"Експортовано записів: {len(rows)}.\n"
+                f"Знеособлення: {'так' if anonymize else 'ні'}.\n"
+                f"Файл: {destination}",
                 parent=self,
             )
         except OSError as error:

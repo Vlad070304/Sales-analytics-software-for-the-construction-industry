@@ -18,6 +18,31 @@ EXPORT_COLUMNS = (
 )
 
 
+def anonymize_sales_rows(rows: list[dict]) -> list[dict]:
+    """Return copies with stable local aliases for customers and managers.
+
+    Aliases preserve analytical relationships inside one exported file while
+    preventing direct disclosure of the source names. The original rows and
+    SQLite database are never changed.
+    """
+    managers = sorted({str(row.get("manager", "")) for row in rows})
+    customers = sorted({str(row.get("customer", "")) for row in rows})
+    manager_aliases = {
+        value: f"Менеджер {index:03d}" for index, value in enumerate(managers, start=1)
+    }
+    customer_aliases = {
+        value: f"Клієнт {index:03d}" for index, value in enumerate(customers, start=1)
+    }
+    return [
+        {
+            **row,
+            "manager": manager_aliases[str(row.get("manager", ""))],
+            "customer": customer_aliases[str(row.get("customer", ""))],
+        }
+        for row in rows
+    ]
+
+
 def export_sales_csv(rows: list[dict], destination: str | Path) -> Path:
     """Save sales rows as a UTF-8 CSV with a BOM for spreadsheet compatibility."""
     path = Path(destination)
