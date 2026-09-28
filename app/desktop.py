@@ -5,8 +5,8 @@ import tkinter as tk
 from datetime import date
 from tkinter import filedialog, messagebox, ttk
 
-from app.analytics import demand_forecast, manager_scores, shortage_risk
-from app.database import add_material, add_sale, connection, delete_material, fetch_materials, initialize, preview_sales_csv, save_import_records, update_material
+from app.analytics import demand_forecast, forecast_accuracy, manager_scores, shortage_risk
+from app.database import add_material, add_sale, backup_database, connection, delete_material, fetch_events, fetch_materials, initialize, log_event, preview_sales_csv, save_import_records, update_material
 
 
 class BuildSalesApp(tk.Tk):
@@ -41,6 +41,8 @@ class BuildSalesApp(tk.Tk):
         tk.Label(header, text="Продажі будівельних матеріалів · локальний режим", fg="#d3dfd9", bg="#17372c", font=("Segoe UI", 10)).pack(anchor="w")
         actions = tk.Frame(header, bg="#17372c")
         actions.pack(anchor="e", side="right", pady=-50)
+        ttk.Button(actions, text="Журнал", command=self.open_event_log).pack(side="left", padx=(0, 8))
+        ttk.Button(actions, text="Резервна копія", command=self.create_backup).pack(side="left", padx=(0, 8))
         ttk.Button(actions, text="Матеріали", command=self.open_materials).pack(side="left", padx=(0, 8))
         ttk.Button(actions, text="Імпортувати CSV", command=self.import_csv).pack(side="left", padx=(0, 8))
         ttk.Button(actions, text="+ Додати продаж", style="Accent.TButton", command=self.open_sale_form).pack(side="left")
@@ -96,13 +98,13 @@ class BuildSalesApp(tk.Tk):
         self.risk_table.bind("<Double-1>", self.open_cpri_explanation)
 
     def _forecast(self, parent: tk.Frame) -> None:
-        tk.Label(parent, text="Прогноз розраховано методом трендово-сезонної декомпозиції на 3 місяці.", bg="#f7f8f3", fg="#53645b", font=("Segoe UI", 10)).pack(anchor="w", pady=(0, 10))
-        columns = ("category", "stock", "risk", "month1", "month2", "month3")
+        tk.Label(parent, text="Прогноз розраховано методом трендово-сезонної декомпозиції на 3 місяці. MAE, RMSE та MAPE — результат rolling backtesting.", bg="#f7f8f3", fg="#53645b", font=("Segoe UI", 10)).pack(anchor="w", pady=(0, 10))
+        columns = ("category", "stock", "risk", "month1", "month2", "month3", "mae", "rmse", "mape")
         self.forecast_table = ttk.Treeview(parent, columns=columns, show="tree headings")
         self.forecast_table.heading("#0", text="Матеріал")
         self.forecast_table.column("#0", width=205)
-        for key, title in [("category", "Категорія"), ("stock", "Запас"), ("risk", "CPRI"), ("month1", "Місяць +1"), ("month2", "Місяць +2"), ("month3", "Місяць +3")]:
-            self.forecast_table.heading(key, text=title); self.forecast_table.column(key, anchor="center", width=125)
+        for key, title, width in [("category", "Категорія", 125), ("stock", "Запас", 90), ("risk", "CPRI", 65), ("month1", "Місяць +1", 105), ("month2", "Місяць +2", 105), ("month3", "Місяць +3", 105), ("mae", "MAE", 65), ("rmse", "RMSE", 65), ("mape", "MAPE, %", 75)]:
+            self.forecast_table.heading(key, text=title); self.forecast_table.column(key, anchor="center", width=width)
         self.forecast_table.pack(fill="both", expand=True)
 
     def metrics(self) -> tuple[dict, list[dict]]:
@@ -134,7 +136,7 @@ class BuildSalesApp(tk.Tk):
                 points = conn.execute(f"SELECT substr(sold_at, 1, 7) period, SUM(quantity) qty FROM sales WHERE {' AND '.join(material_clauses)} GROUP BY period ORDER BY period", material_params).fetchall()
             series = [(row["period"], row["qty"]) for row in points]
             forecast = demand_forecast(series)
-            materials.append({**material, "forecast": forecast, "risk": shortage_risk([v for _, v in series][-12:], material["stock"], material["lead_time_days"], forecast[0]["quantity"] if forecast else None)})
+            materials.append({**material, "forecast": forecast, "accuracy": forecast_accuracy(series), "risk": shortage_risk([v for _, v in series][-12:], material["stock"], material["lead_time_days"], forecast[0]["quantity"] if forecast else None)})
         return {"sales": sales, "monthly": monthly, "materials": materials, "managers": manager_scores(sales)}, materials
 
     def apply_filters(self) -> None:
@@ -182,7 +184,9 @@ class BuildSalesApp(tk.Tk):
             self.risk_details[item_id] = m
             self.risk_table.insert("", "end", iid=item_id, text=m["name"], values=(m["risk"]["score"], m["risk"]["level"], f"{m['stock']} {m['unit']}"))
             forecast = [f"{point['period']}: {point['quantity']}" for point in m["forecast"]]
-            self.forecast_table.insert("", "end", text=m["name"], values=(m["category"], f"{m['stock']} {m['unit']}", m["risk"]["score"], *forecast))
+            accuracy = m["accuracy"]
+            quality = ["—" if accuracy[key] is None else accuracy[key] for key in ("mae", "rmse", "mape")]
+            self.forecast_table.insert("", "end", text=m["name"], values=(m["category"], f"{m['stock']} {m['unit']}", m["risk"]["score"], *forecast, *quality))
         for m in data["managers"]:
             self.manager_table.insert("", "end", text=m["manager"], values=(m["score"], m["deals"], f"{m['revenue']:,.0f}"))
 
@@ -318,6 +322,30 @@ class BuildSalesApp(tk.Tk):
             self.open_import_preview(report)
         except (OSError, ValueError) as error:
             messagebox.showerror("Помилка імпорту", str(error), parent=self)
+
+    def create_backup(self) -> None:
+        try:
+            path = backup_database()
+            log_event("manual_backup", f"Створено резервну копію: {path.name}")
+            messagebox.showinfo("Резервна копія створена", f"Базу даних збережено тут:\n{path}", parent=self)
+        except (OSError, ValueError) as error:
+            messagebox.showerror("Помилка резервного копіювання", str(error), parent=self)
+
+    def open_event_log(self) -> None:
+        window = tk.Toplevel(self)
+        window.title("Журнал операцій")
+        window.geometry("760x420")
+        window.transient(self)
+        frame = tk.Frame(window, padx=18, pady=18); frame.pack(fill="both", expand=True)
+        tk.Label(frame, text="Журнал операцій", font=("Segoe UI", 15, "bold")).pack(anchor="w")
+        tk.Label(frame, text="Показано останні 100 подій, пов'язаних зі зміною даних і резервним копіюванням.", fg="#53645b").pack(anchor="w", pady=(3, 12))
+        table = ttk.Treeview(frame, columns=("time", "type", "details"), show="headings")
+        for key, title, width in [("time", "Час", 165), ("type", "Операція", 140), ("details", "Деталі", 390)]:
+            table.heading(key, text=title); table.column(key, width=width, anchor="w")
+        table.pack(fill="both", expand=True)
+        names = {"csv_import": "Імпорт CSV", "manual_backup": "Резервна копія"}
+        for event in fetch_events():
+            table.insert("", "end", values=(event["created_at"].replace("T", " "), names.get(event["event_type"], event["event_type"]), event["details"]))
 
     def open_import_preview(self, report: dict) -> None:
         if not report["records"]:

@@ -17,13 +17,14 @@ class CsvImportTests(unittest.TestCase):
             "2026-09-21,Цемент М500,Тест Менеджер,ТОВ Тест,12.5,190\n"
             "wrong-date,Невідомий,Тест,ТОВ Тест,3,100\n"
         )
-        with patch.object(Path, "read_text", return_value=content), patch.object(database, "connection", return_value=conn):
+        with patch.object(Path, "read_text", return_value=content), patch.object(database, "connection", return_value=conn), patch.object(database, "backup_database"), patch.object(database, "log_event"):
             report = database.preview_sales_csv("sales.csv")
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM sales").fetchone()[0], 0)
             inserted = database.save_import_records(report["records"])
         self.assertEqual(inserted, 1)
         self.assertEqual(report["skipped"], 1)
         self.assertEqual(conn.execute("SELECT COUNT(*) FROM sales").fetchone()[0], 1)
+        conn.close()
 
     def test_rejects_csv_with_missing_columns(self):
         with patch.object(Path, "read_text", return_value="date,value\n2026-09-21,5\n"):

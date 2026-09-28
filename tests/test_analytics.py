@@ -1,6 +1,6 @@
 import unittest
 
-from app.analytics import demand_forecast, linear_trend, shortage_risk
+from app.analytics import demand_forecast, forecast_accuracy, linear_trend, shortage_risk
 
 
 class AnalyticsTests(unittest.TestCase):
@@ -21,6 +21,14 @@ class AnalyticsTests(unittest.TestCase):
         growing = shortage_risk([100, 100, 100], stock=100, lead_time_days=10, next_forecast=200)
         self.assertGreater(growing["score"], baseline["score"])
         self.assertGreater(growing["seasonality_component"], 0)
+
+    def test_backtesting_returns_standard_error_metrics(self):
+        monthly = [(f"2025-{month:02d}", float(month * 10)) for month in range(1, 11)]
+        result = forecast_accuracy(monthly, min_train_periods=4)
+        self.assertEqual(result["observations"], 6)
+        self.assertIsNotNone(result["mae"])
+        self.assertIsNotNone(result["rmse"])
+        self.assertIsNotNone(result["mape"])
 
 
 if __name__ == "__main__":

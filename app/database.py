@@ -3,10 +3,24 @@ from __future__ import annotations
 
 import sqlite3
 import csv
-from datetime import date
+import shutil
+from datetime import date, datetime
 from pathlib import Path
 
 DATABASE_PATH = Path(__file__).resolve().parent.parent / "data" / "buildsales.sqlite3"
+
+
+def backup_database(label: str = "manual") -> Path:
+    """Create a timestamped local copy of the SQLite database."""
+    if not DATABASE_PATH.exists():
+        raise ValueError("Базу даних ще не створено.")
+    safe_label = "".join(char if char.isalnum() or char in "-_" else "-" for char in label)
+    target_dir = DATABASE_PATH.parent / "backups"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    target = target_dir / f"buildsales-{safe_label}-{timestamp}.sqlite3"
+    shutil.copy2(DATABASE_PATH, target)
+    return target
 
 
 def connection() -> sqlite3.Connection:
@@ -31,6 +45,10 @@ def initialize() -> None:
               manager TEXT NOT NULL, customer TEXT NOT NULL,
               quantity REAL NOT NULL CHECK(quantity > 0),
               unit_price REAL NOT NULL CHECK(unit_price >= 0)
+            );
+            CREATE TABLE IF NOT EXISTS audit_log (
+              id INTEGER PRIMARY KEY, created_at TEXT NOT NULL,
+              event_type TEXT NOT NULL, details TEXT NOT NULL
             );
             """
         )
@@ -66,6 +84,19 @@ def seed(conn: sqlite3.Connection) -> None:
 def fetch_materials() -> list[dict]:
     with connection() as conn:
         return [dict(row) for row in conn.execute("SELECT * FROM materials ORDER BY name")]
+
+
+def log_event(event_type: str, details: str) -> None:
+    with connection() as conn:
+        conn.execute(
+            "INSERT INTO audit_log(created_at, event_type, details) VALUES (?, ?, ?)",
+            (datetime.now().isoformat(timespec="seconds"), event_type, details),
+        )
+
+
+def fetch_events(limit: int = 100) -> list[dict]:
+    with connection() as conn:
+        return [dict(row) for row in conn.execute("SELECT * FROM audit_log ORDER BY id DESC LIMIT ?", (limit,))]
 
 
 def validate_material(payload: dict) -> tuple[str, str, str, float, int]:
@@ -165,10 +196,12 @@ def save_import_records(records: list[dict]) -> int:
     if not records:
         return 0
     values = [(row["sold_at"], row["material_id"], row["manager"], row["customer"], row["quantity"], row["unit_price"]) for row in records]
+    backup_database("before-import")
     with connection() as conn:
         conn.executemany(
             "INSERT INTO sales(sold_at, material_id, manager, customer, quantity, unit_price) VALUES (?, ?, ?, ?, ?, ?)", values
         )
+    log_event("csv_import", f"Імпортовано записів: {len(values)}")
     return len(values)
 
 

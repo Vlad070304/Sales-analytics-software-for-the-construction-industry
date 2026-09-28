@@ -39,6 +39,30 @@ def demand_forecast(monthly: list[tuple[str, float]], horizon: int = 3) -> list[
     return result
 
 
+def forecast_accuracy(monthly: list[tuple[str, float]], min_train_periods: int = 6) -> dict:
+    """Evaluate one-step rolling forecasts against known historical demand.
+
+    MAE and RMSE retain the material's unit; MAPE is returned as a percentage.
+    """
+    if len(monthly) <= min_train_periods:
+        return {"observations": 0, "mae": None, "rmse": None, "mape": None}
+    errors: list[float] = []
+    percentage_errors: list[float] = []
+    for point in range(min_train_periods, len(monthly)):
+        prediction = demand_forecast(monthly[:point], horizon=1)[0]["quantity"]
+        actual = monthly[point][1]
+        error = prediction - actual
+        errors.append(error)
+        if actual:
+            percentage_errors.append(abs(error) / abs(actual) * 100)
+    return {
+        "observations": len(errors),
+        "mae": round(sum(abs(error) for error in errors) / len(errors), 2),
+        "rmse": round(sqrt(sum(error ** 2 for error in errors) / len(errors)), 2),
+        "mape": round(sum(percentage_errors) / len(percentage_errors), 2) if percentage_errors else None,
+    }
+
+
 def shortage_risk(monthly_values: list[float], stock: float, lead_time_days: int, next_forecast: float | None = None) -> dict:
     """Calculate seasonality-adaptive Construction Procurement Risk Index (CPRI)."""
     if not monthly_values:
