@@ -26,7 +26,5 @@ def export_sales_csv(rows: list[dict], destination: str | Path) -> Path:
         writer = csv.DictWriter(file, fieldnames=labels)
         writer.writeheader()
         for row in rows:
-            writer.writerow(
-                {label: row.get(key, "") for key, label in EXPORT_COLUMNS}
-            )
+            writer.writerow({label: row.get(key, "") for key, label in EXPORT_COLUMNS})
     return path

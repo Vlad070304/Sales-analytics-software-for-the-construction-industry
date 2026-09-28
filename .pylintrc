@@ -1,0 +1,14 @@
+[MASTER]
+persistent=no
+
+[MESSAGES CONTROL]
+disable=
+    duplicate-code,
+    missing-module-docstring,
+    missing-class-docstring,
+    missing-function-docstring,
+    too-many-branches,
+    too-many-instance-attributes,
+    too-many-lines,
+    too-many-locals,
+    too-many-statements

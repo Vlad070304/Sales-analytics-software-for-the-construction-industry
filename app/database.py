@@ -305,6 +305,19 @@ def _sale_key(
     )
 
 
+def _is_valid_csv_sale(
+    manager: str,
+    customer: str,
+    quantity: float,
+    unit_price: float,
+) -> bool:
+    """Return whether parsed CSV values satisfy all required sale constraints."""
+    has_text_fields = bool(manager and customer)
+    has_finite_numbers = isfinite(quantity) and isfinite(unit_price)
+    has_valid_amounts = quantity > 0 and unit_price >= 0
+    return has_text_fields and has_finite_numbers and has_valid_amounts
+
+
 def preview_sales_csv(file_path: str | Path) -> dict:
     """Parse and validate CSV rows without changing the database.
 
@@ -346,14 +359,7 @@ def preview_sales_csv(file_path: str | Path) -> dict:
                     unit_price = float((row["unit_price"] or "").replace(",", "."))
                 except ValueError:
                     raise ValueError("кількість і ціна мають бути числами") from None
-                if (
-                    not manager
-                    or not customer
-                    or not isfinite(quantity)
-                    or not isfinite(unit_price)
-                    or quantity <= 0
-                    or unit_price < 0
-                ):
+                if not _is_valid_csv_sale(manager, customer, quantity, unit_price):
                     raise ValueError("некоректні текстові або числові дані")
                 records.append(
                     {

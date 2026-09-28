@@ -669,9 +669,14 @@ class BuildSalesApp(tk.Tk):
         gap = width / max(len(points), 1)
         for i, (period, value) in enumerate(points):
             x = i * gap + 12
-            bar = (height - 25) * value / maximum
+            bar_height = (height - 25) * value / maximum
             self.chart.create_rectangle(
-                x, height - 22 - bar, x + gap - 14, height - 22, fill="#176b4c", width=0
+                x,
+                height - 22 - bar_height,
+                x + gap - 14,
+                height - 22,
+                fill="#176b4c",
+                width=0,
             )
             self.chart.create_text(
                 x + gap / 2 - 7,
@@ -876,7 +881,7 @@ class BuildSalesApp(tk.Tk):
 
         controls = tk.Frame(container)
         controls.pack(fill="x", pady=(12, 0))
-        ttk.Button(controls, text="+ Новий", command=lambda: open_editor()).pack(side="left")
+        ttk.Button(controls, text="+ Новий", command=open_editor).pack(side="left")
 
         def edit_selected() -> None:
             material = selected_material()
