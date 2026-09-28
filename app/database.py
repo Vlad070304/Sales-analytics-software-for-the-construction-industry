@@ -1,9 +1,11 @@
 """SQLite storage and reproducible demonstration dataset."""
+
 from __future__ import annotations
 
 import sqlite3
 import csv
 import shutil
+from math import isfinite
 from datetime import date, datetime
 from pathlib import Path
 
@@ -24,6 +26,7 @@ def backup_database(label: str = "manual") -> Path:
 
 
 def connection() -> sqlite3.Connection:
+    """Open a row-addressable connection to the local SQLite database."""
     DATABASE_PATH.parent.mkdir(exist_ok=True)
     conn = sqlite3.connect(DATABASE_PATH)
     conn.row_factory = sqlite3.Row
@@ -31,6 +34,7 @@ def connection() -> sqlite3.Connection:
 
 
 def initialize() -> None:
+    """Create the storage schema and populate an empty database with demonstration data."""
     with connection() as conn:
         conn.executescript(
             """
@@ -57,6 +61,7 @@ def initialize() -> None:
 
 
 def seed(conn: sqlite3.Connection) -> None:
+    """Populate a new database with reproducible construction-sales demonstration data."""
     materials = [
         ("Цемент М500", "Сухі суміші", "мішок", 260, 10),
         ("Арматура A500C", "Металопрокат", "т", 35, 21),
@@ -64,29 +69,70 @@ def seed(conn: sqlite3.Connection) -> None:
         ("Бітумна черепиця", "Покрівля", "м²", 460, 18),
     ]
     conn.executemany(
-        "INSERT INTO materials(name, category, unit, stock, lead_time_days) VALUES (?, ?, ?, ?, ?)", materials
+        "INSERT INTO materials(name, category, unit, stock, lead_time_days) VALUES (?, ?, ?, ?, ?)",
+        materials,
     )
-    base = [(1, "Ірина Коваль", "ТОВ Будмонтаж", 95.0), (2, "Олег Марченко", "ПП Фасад", 1.7),
-            (3, "Ірина Коваль", "ЖК Весна", 42.0), (4, "Наталія Бойко", "Покрівля Плюс", 110.0)]
+    base = [
+        (1, "Ірина Коваль", "ТОВ Будмонтаж", 95.0),
+        (2, "Олег Марченко", "ПП Фасад", 1.7),
+        (3, "Ірина Коваль", "ЖК Весна", 42.0),
+        (4, "Наталія Бойко", "Покрівля Плюс", 110.0),
+    ]
     prices = {1: 182.0, 2: 36500.0, 3: 2450.0, 4: 310.0}
     rows = []
     for month in range(1, 13):
-        season = [0.62, 0.68, 0.85, 1.12, 1.25, 1.30, 1.22, 1.12, 1.05, 0.94, 0.72, 0.60][month - 1]
+        season = [
+            0.62,
+            0.68,
+            0.85,
+            1.12,
+            1.25,
+            1.30,
+            1.22,
+            1.12,
+            1.05,
+            0.94,
+            0.72,
+            0.60,
+        ][month - 1]
         for material_id, manager, customer, amount in base:
             quantity = round(amount * season * (1 + month * 0.018), 2)
-            rows.append((date(2025, month, 12).isoformat(), material_id, manager, customer, quantity, prices[material_id]))
-            rows.append((date(2026, month, 18).isoformat(), material_id, manager, customer, round(quantity * 1.10, 2), prices[material_id] * 1.04))
+            rows.append(
+                (
+                    date(2025, month, 12).isoformat(),
+                    material_id,
+                    manager,
+                    customer,
+                    quantity,
+                    prices[material_id],
+                )
+            )
+            rows.append(
+                (
+                    date(2026, month, 18).isoformat(),
+                    material_id,
+                    manager,
+                    customer,
+                    round(quantity * 1.10, 2),
+                    prices[material_id] * 1.04,
+                )
+            )
     conn.executemany(
-        "INSERT INTO sales(sold_at, material_id, manager, customer, quantity, unit_price) VALUES (?, ?, ?, ?, ?, ?)", rows
+        "INSERT INTO sales("
+        "sold_at, material_id, manager, customer, quantity, unit_price"
+        ") VALUES (?, ?, ?, ?, ?, ?)",
+        rows,
     )
 
 
 def fetch_materials() -> list[dict]:
+    """Return all materials in alphabetical order."""
     with connection() as conn:
         return [dict(row) for row in conn.execute("SELECT * FROM materials ORDER BY name")]
 
 
 def log_event(event_type: str, details: str) -> None:
+    """Record a user-visible data-management event."""
     with connection() as conn:
         conn.execute(
             "INSERT INTO audit_log(created_at, event_type, details) VALUES (?, ?, ?)",
@@ -95,8 +141,12 @@ def log_event(event_type: str, details: str) -> None:
 
 
 def fetch_events(limit: int = 100) -> list[dict]:
+    """Return the most recent audit-log entries."""
     with connection() as conn:
-        return [dict(row) for row in conn.execute("SELECT * FROM audit_log ORDER BY id DESC LIMIT ?", (limit,))]
+        return [
+            dict(row)
+            for row in conn.execute("SELECT * FROM audit_log ORDER BY id DESC LIMIT ?", (limit,))
+        ]
 
 
 def validate_material(payload: dict) -> tuple[str, str, str, float, int]:
@@ -117,48 +167,117 @@ def validate_material(payload: dict) -> tuple[str, str, str, float, int]:
 
 
 def add_material(payload: dict) -> int:
+    """Validate and persist a new material, returning its identifier."""
     values = validate_material(payload)
     try:
         with connection() as conn:
             return conn.execute(
-                "INSERT INTO materials(name, category, unit, stock, lead_time_days) VALUES (?, ?, ?, ?, ?)", values
+                "INSERT INTO materials("
+                "name, category, unit, stock, lead_time_days"
+                ") VALUES (?, ?, ?, ?, ?)",
+                values,
             ).lastrowid
     except sqlite3.IntegrityError as error:
         raise ValueError("Матеріал із такою назвою вже існує.") from error
 
 
 def update_material(material_id: int, payload: dict) -> None:
+    """Validate and update an existing material."""
     values = validate_material(payload)
     try:
         with connection() as conn:
-            if conn.execute("UPDATE materials SET name=?, category=?, unit=?, stock=?, lead_time_days=? WHERE id=?", (*values, material_id)).rowcount == 0:
+            if (
+                conn.execute(
+                    "UPDATE materials SET name=?, category=?, unit=?, stock=?, "
+                    "lead_time_days=? WHERE id=?",
+                    (*values, material_id),
+                ).rowcount
+                == 0
+            ):
                 raise ValueError("Матеріал не знайдено.")
     except sqlite3.IntegrityError as error:
         raise ValueError("Матеріал із такою назвою вже існує.") from error
 
 
 def delete_material(material_id: int) -> None:
+    """Delete a material only when it has no sales history."""
     with connection() as conn:
-        if conn.execute("SELECT COUNT(*) FROM sales WHERE material_id=?", (material_id,)).fetchone()[0]:
+        if conn.execute(
+            "SELECT COUNT(*) FROM sales WHERE material_id=?", (material_id,)
+        ).fetchone()[0]:
             raise ValueError("Неможливо видалити матеріал, для якого вже є продажі.")
         if conn.execute("DELETE FROM materials WHERE id=?", (material_id,)).rowcount == 0:
             raise ValueError("Матеріал не знайдено.")
 
 
-def add_sale(payload: dict) -> int:
-    required = ("sold_at", "material_id", "manager", "customer", "quantity", "unit_price")
-    if not all(payload.get(field) not in (None, "") for field in required):
-        raise ValueError("Заповніть усі поля продажу.")
-    with connection() as conn:
-        cursor = conn.execute(
-            "INSERT INTO sales(sold_at, material_id, manager, customer, quantity, unit_price) VALUES (?, ?, ?, ?, ?, ?)",
-            tuple(payload[field] for field in required),
+def _parse_number(value: object, label: str, allow_zero: bool = False) -> float:
+    """Parse a decimal typed with a dot or a comma; reject NaN, infinity and out-of-range values."""
+    try:
+        number = float(str(value).strip().replace(",", "."))
+    except ValueError as error:
+        raise ValueError(f"{label} має бути числом.") from error
+    if not isfinite(number):
+        raise ValueError(f"{label} має бути скінченним числом.")
+    if number < 0 or (number == 0 and not allow_zero):
+        raise ValueError(
+            f"{label} не може бути від'ємною."
+            if allow_zero
+            else f"{label} має бути більшою за нуль."
         )
-        return cursor.lastrowid
+    return number
+
+
+def validate_sale(payload: dict) -> tuple[str, int, str, str, float, float]:
+    """Normalize and validate a manually entered sale before persistence."""
+    manager = str(payload.get("manager") or "").strip()
+    customer = str(payload.get("customer") or "").strip()
+    if not manager or not customer or payload.get("material_id") in (None, ""):
+        raise ValueError("Заповніть усі поля продажу.")
+    try:
+        sold_at = date.fromisoformat(str(payload.get("sold_at") or "").strip()).isoformat()
+    except ValueError as error:
+        raise ValueError("Дата має бути у форматі РРРР-ММ-ДД.") from error
+    try:
+        material_id = int(payload["material_id"])
+    except (TypeError, ValueError) as error:
+        raise ValueError("Некоректний матеріал.") from error
+    quantity = _parse_number(payload.get("quantity"), "Кількість")
+    unit_price = _parse_number(payload.get("unit_price"), "Ціна", allow_zero=True)
+    return sold_at, material_id, manager, customer, quantity, unit_price
+
+
+def add_sale(payload: dict) -> int:
+    """Validate and persist a manually entered sale."""
+    sold_at, material_id, manager, customer, quantity, unit_price = validate_sale(payload)
+    with connection() as conn:
+        if conn.execute("SELECT 1 FROM materials WHERE id=?", (material_id,)).fetchone() is None:
+            raise ValueError("Матеріал не знайдено.")
+        return conn.execute(
+            "INSERT INTO sales("
+            "sold_at, material_id, manager, customer, quantity, unit_price"
+            ") VALUES (?, ?, ?, ?, ?, ?)",
+            (sold_at, material_id, manager, customer, quantity, unit_price),
+        ).lastrowid
+
+
+def _sale_key(
+    sold_at: str, customer: str, material_id: int, quantity: float, unit_price: float
+) -> tuple:
+    """Identity of a deal for duplicate detection: date, customer, material and total amount."""
+    return (
+        sold_at,
+        customer.strip().casefold(),
+        material_id,
+        round(quantity * unit_price, 2),
+    )
 
 
 def preview_sales_csv(file_path: str | Path) -> dict:
-    """Parse and validate CSV rows without changing the database."""
+    """Parse and validate CSV rows without changing the database.
+
+    Rows that repeat a deal already stored in the database, or an earlier row
+    of the same file, are reported as duplicates and excluded from ``records``.
+    """
     required = {"sold_at", "material", "manager", "customer", "quantity", "unit_price"}
     path = Path(file_path)
     try:
@@ -173,33 +292,117 @@ def preview_sales_csv(file_path: str | Path) -> dict:
     records: list[dict] = []
     errors: list[str] = []
     with connection() as conn:
-        material_ids = {row["name"]: row["id"] for row in conn.execute("SELECT id, name FROM materials")}
+        material_ids = {
+            row["name"]: row["id"] for row in conn.execute("SELECT id, name FROM materials")
+        }
         for line_number, row in enumerate(reader, start=2):
             try:
                 sold_at = (row["sold_at"] or "").strip()
-                date.fromisoformat(sold_at)
-                material_id = material_ids[(row["material"] or "").strip()]
+                try:
+                    date.fromisoformat(sold_at)
+                except ValueError:
+                    raise ValueError("дата має бути у форматі РРРР-ММ-ДД") from None
+                material_name = (row["material"] or "").strip()
+                if material_name not in material_ids:
+                    raise ValueError(f"матеріал «{material_name}» відсутній у довіднику")
+                material_id = material_ids[material_name]
                 manager = (row["manager"] or "").strip()
                 customer = (row["customer"] or "").strip()
-                quantity = float((row["quantity"] or "").replace(",", "."))
-                unit_price = float((row["unit_price"] or "").replace(",", "."))
-                if not manager or not customer or quantity <= 0 or unit_price < 0:
+                try:
+                    quantity = float((row["quantity"] or "").replace(",", "."))
+                    unit_price = float((row["unit_price"] or "").replace(",", "."))
+                except ValueError:
+                    raise ValueError("кількість і ціна мають бути числами") from None
+                if (
+                    not manager
+                    or not customer
+                    or not isfinite(quantity)
+                    or not isfinite(unit_price)
+                    or quantity <= 0
+                    or unit_price < 0
+                ):
                     raise ValueError("некоректні текстові або числові дані")
-                records.append({"sold_at": sold_at, "material": row["material"].strip(), "material_id": material_id, "manager": manager, "customer": customer, "quantity": quantity, "unit_price": unit_price})
-            except (KeyError, TypeError, ValueError) as error:
+                records.append(
+                    {
+                        "sold_at": sold_at,
+                        "material": material_name,
+                        "material_id": material_id,
+                        "manager": manager,
+                        "customer": customer,
+                        "quantity": quantity,
+                        "unit_price": unit_price,
+                        "line": line_number,
+                    }
+                )
+            except ValueError as error:
                 errors.append(f"рядок {line_number}: {error}")
-    return {"records": records, "valid": len(records), "skipped": len(errors), "errors": errors}
+        stored: set[tuple] = set()
+        if records:
+            dates = [record["sold_at"] for record in records]
+            stored = {
+                _sale_key(
+                    row["sold_at"],
+                    row["customer"],
+                    row["material_id"],
+                    row["quantity"],
+                    row["unit_price"],
+                )
+                for row in conn.execute(
+                    "SELECT sold_at, customer, material_id, quantity, unit_price "
+                    "FROM sales WHERE sold_at BETWEEN ? AND ?",
+                    (min(dates), max(dates)),
+                )
+            }
+    unique: list[dict] = []
+    duplicate_details: list[str] = []
+    seen_in_file: set[tuple] = set()
+    for record in records:
+        key = _sale_key(
+            record["sold_at"],
+            record["customer"],
+            record["material_id"],
+            record["quantity"],
+            record["unit_price"],
+        )
+        if key in stored:
+            duplicate_details.append(f"рядок {record['line']}: така угода вже є в базі")
+        elif key in seen_in_file:
+            duplicate_details.append(f"рядок {record['line']}: повтор попереднього рядка файлу")
+        else:
+            seen_in_file.add(key)
+            unique.append(record)
+    return {
+        "records": unique,
+        "valid": len(unique),
+        "skipped": len(errors),
+        "errors": errors,
+        "duplicates": len(duplicate_details),
+        "duplicate_details": duplicate_details,
+    }
 
 
 def save_import_records(records: list[dict]) -> int:
     """Persist records previously returned by preview_sales_csv in one transaction."""
     if not records:
         return 0
-    values = [(row["sold_at"], row["material_id"], row["manager"], row["customer"], row["quantity"], row["unit_price"]) for row in records]
+    values = [
+        (
+            row["sold_at"],
+            row["material_id"],
+            row["manager"],
+            row["customer"],
+            row["quantity"],
+            row["unit_price"],
+        )
+        for row in records
+    ]
     backup_database("before-import")
     with connection() as conn:
         conn.executemany(
-            "INSERT INTO sales(sold_at, material_id, manager, customer, quantity, unit_price) VALUES (?, ?, ?, ?, ?, ?)", values
+            "INSERT INTO sales("
+            "sold_at, material_id, manager, customer, quantity, unit_price"
+            ") VALUES (?, ?, ?, ?, ?, ?)",
+            values,
         )
     log_event("csv_import", f"Імпортовано записів: {len(values)}")
     return len(values)

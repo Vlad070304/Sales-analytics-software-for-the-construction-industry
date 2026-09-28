@@ -1,6 +1,14 @@
 import unittest
 
-from app.analytics import demand_forecast, forecast_accuracy, linear_trend, shortage_risk
+from app.analytics import (
+    CPRI_WEIGHTS,
+    demand_forecast,
+    forecast_accuracy,
+    linear_trend,
+    seasonal_naive_forecast,
+    shortage_risk,
+    validate_weights,
+)
 
 
 class AnalyticsTests(unittest.TestCase):
@@ -29,6 +37,73 @@ class AnalyticsTests(unittest.TestCase):
         self.assertIsNotNone(result["mae"])
         self.assertIsNotNone(result["rmse"])
         self.assertIsNotNone(result["mape"])
+
+    def test_seasonal_naive_uses_same_month_of_previous_year(self):
+        monthly = [("2025-03", 40.0), ("2025-04", 55.0), ("2026-01", 10.0)]
+        self.assertEqual(seasonal_naive_forecast(monthly, "2026-04"), 55.0)
+        self.assertIsNone(seasonal_naive_forecast(monthly, "2026-05"))
+
+    def test_backtesting_compares_model_with_seasonal_naive_baseline(self):
+        pattern = [
+            10.0,
+            12.0,
+            14.0,
+            16.0,
+            18.0,
+            20.0,
+            19.0,
+            17.0,
+            15.0,
+            13.0,
+            11.0,
+            9.0,
+        ]
+        monthly = [(f"2025-{m:02d}", v) for m, v in enumerate(pattern, start=1)]
+        monthly += [(f"2026-{m:02d}", v * 2) for m, v in enumerate(pattern, start=1)]
+        result = forecast_accuracy(monthly, min_train_periods=6)
+        baseline = result["baseline"]
+        # Baseline is only scored where the same month of the previous year exists.
+        self.assertEqual(baseline["observations"], 12)
+        # Naive forecast for 2026 equals 2025, so its error is exactly the 2025 value.
+        self.assertAlmostEqual(baseline["mae"], sum(pattern) / 12, places=2)
+        expected_gain = round((baseline["mae"] - baseline["model_mae"]) / baseline["mae"] * 100, 2)
+        self.assertEqual(baseline["gain_pct"], expected_gain)
+
+    def test_baseline_is_empty_without_a_full_year_of_history(self):
+        monthly = [(f"2025-{month:02d}", float(month * 10)) for month in range(1, 11)]
+        baseline = forecast_accuracy(monthly, min_train_periods=4)["baseline"]
+        self.assertEqual(baseline["observations"], 0)
+        self.assertIsNone(baseline["mae"])
+        self.assertIsNone(baseline["gain_pct"])
+
+    def test_default_weights_keep_expert_cpri_unchanged(self):
+        self.assertEqual(sum(CPRI_WEIGHTS.values()), 1.0)
+        risk = shortage_risk([100, 120, 90], stock=50, lead_time_days=20, next_forecast=130)
+        self.assertEqual(
+            risk,
+            shortage_risk(
+                [100, 120, 90],
+                stock=50,
+                lead_time_days=20,
+                next_forecast=130,
+                weights=CPRI_WEIGHTS,
+            ),
+        )
+        self.assertEqual(risk["score"], 60.2)
+
+    def test_custom_weights_change_score(self):
+        only_lead = {"demand": 0.0, "volatility": 0.0, "lead": 1.0, "seasonality": 0.0}
+        risk = shortage_risk([100, 100, 100], stock=1000, lead_time_days=15, weights=only_lead)
+        self.assertEqual(risk["score"], 50.0)
+
+    def test_invalid_weights_are_rejected(self):
+        for weights in (
+            {"demand": 0.5, "volatility": 0.5, "lead": 0.5, "seasonality": 0.5},
+            {"demand": 1.2, "volatility": -0.2, "lead": 0.0, "seasonality": 0.0},
+            {"demand": 1.0},
+        ):
+            with self.subTest(weights=weights), self.assertRaises(ValueError):
+                validate_weights(weights)
 
 
 if __name__ == "__main__":
