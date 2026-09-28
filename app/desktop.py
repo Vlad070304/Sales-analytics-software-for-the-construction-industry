@@ -39,8 +39,8 @@ class BuildSalesApp(tk.Tk):
         """Initialise window state and construct the application interface."""
         super().__init__()
         self.title("BuildSales Insight — аналітика продажів")
-        self.geometry("1180x760")
-        self.minsize(900, 600)
+        self.geometry("1200x900")
+        self.minsize(950, 760)
         self.configure(bg="#f7f8f3")
         self.filter_start = tk.StringVar()
         self.filter_end = tk.StringVar()
@@ -215,19 +215,26 @@ class BuildSalesApp(tk.Tk):
         frame.pack(fill="x", pady=(0, 14))
         self.chart = tk.Canvas(frame, height=175, bg="white", highlightthickness=0)
         self.chart.pack(fill="x")
-        lower = tk.Frame(parent, bg="#f7f8f3")
+        lower = tk.Frame(parent, bg="#f7f8f3", height=250)
         lower.pack(fill="both", expand=True)
+        lower.pack_propagate(False)
         risk_frame = ttk.LabelFrame(lower, text=" Індекс пріоритету закупівлі CPRI ", padding=10)
         risk_frame.pack(side="left", fill="both", expand=True, padx=(0, 7))
         manager_frame = ttk.LabelFrame(lower, text=" Ефективність менеджерів ", padding=10)
         manager_frame.pack(side="left", fill="both", expand=True, padx=(7, 0))
         self.risk_table = ttk.Treeview(
-            risk_frame, columns=("risk", "level", "stock"), show="tree headings"
+            risk_frame,
+            columns=("risk", "level", "stock"),
+            show="tree headings",
+            height=7,
         )
         self.risk_table.heading("#0", text="Матеріал")
         self.risk_table.column("#0", width=175)
         self.manager_table = ttk.Treeview(
-            manager_frame, columns=("score", "deals", "revenue"), show="headings"
+            manager_frame,
+            columns=("score", "deals", "revenue"),
+            show="headings",
+            height=7,
         )
         for table, headings in (
             (
