@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from math import sqrt
+from statistics import median
 from typing import Iterator
 
 
@@ -159,6 +160,46 @@ def procurement_recommendation(
         "order_quantity": round(max(0, target_stock - max(stock, 0)), 2),
         "confidence": round(confidence, 1) if confidence is not None else None,
         "confidence_level": confidence_level,
+    }
+
+
+def seasonal_anomaly(monthly: list[tuple[str, float]], threshold_pct: float = 15) -> dict:
+    """Detect the latest demand deviation against the same month in prior years.
+
+    The score is a signed relative deviation clipped to [-100; 100]. This
+    transparent comparison distinguishes a normal construction-season peak
+    from an unusual change in demand for that calendar month.
+    """
+    if len(monthly) < 2:
+        return {
+            "score": None,
+            "direction": "недостатньо даних",
+            "baseline": None,
+            "actual": monthly[-1][1] if monthly else None,
+            "observations": 0,
+        }
+    latest_period, actual = monthly[-1]
+    latest_month = latest_period[5:7]
+    reference = [value for period, value in monthly[:-1] if period[5:7] == latest_month]
+    if not reference:
+        return {
+            "score": None,
+            "direction": "недостатньо даних",
+            "baseline": None,
+            "actual": actual,
+            "observations": 0,
+        }
+    baseline = median(reference)
+    score = max(-100, min(100, (actual - baseline) / max(abs(baseline), 1) * 100))
+    direction = (
+        "зростання" if score >= threshold_pct else "спад" if score <= -threshold_pct else "норма"
+    )
+    return {
+        "score": round(score, 1),
+        "direction": direction,
+        "baseline": round(baseline, 2),
+        "actual": round(actual, 2),
+        "observations": len(reference),
     }
 
 

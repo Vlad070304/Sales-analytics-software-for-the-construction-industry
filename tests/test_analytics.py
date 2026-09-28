@@ -7,6 +7,7 @@ from app.analytics import (
     forecast_accuracy,
     linear_trend,
     procurement_recommendation,
+    seasonal_anomaly,
     seasonal_naive_forecast,
     shortage_risk,
     validate_weights,
@@ -155,6 +156,17 @@ class AnalyticsTests(unittest.TestCase):
         )
         self.assertIsNone(result["confidence"])
         self.assertEqual(result["confidence_level"], "недостатньо даних")
+
+    def test_seasonal_anomaly_detects_unusual_growth_for_same_calendar_month(self):
+        result = seasonal_anomaly([("2024-06", 100.0), ("2025-06", 120.0), ("2026-06", 180.0)])
+        self.assertEqual(result["baseline"], 110.0)
+        self.assertEqual(result["score"], 63.6)
+        self.assertEqual(result["direction"], "зростання")
+
+    def test_seasonal_anomaly_requires_same_month_history(self):
+        result = seasonal_anomaly([("2026-05", 100.0), ("2026-06", 120.0)])
+        self.assertIsNone(result["score"])
+        self.assertEqual(result["direction"], "недостатньо даних")
 
 
 if __name__ == "__main__":

@@ -13,6 +13,7 @@ from app.analytics import (
     forecast_accuracy,
     manager_scores,
     procurement_recommendation,
+    seasonal_anomaly,
     shortage_risk,
 )
 from app.database import (
@@ -281,7 +282,7 @@ class BuildSalesApp(tk.Tk):
         manager_frame.pack(side="left", fill="both", expand=True, padx=(7, 0))
         self.risk_table = ttk.Treeview(
             risk_frame,
-            columns=("risk", "level", "stock", "order"),
+            columns=("risk", "level", "stock", "order", "anomaly"),
             show="tree headings",
             height=7,
         )
@@ -301,6 +302,7 @@ class BuildSalesApp(tk.Tk):
                     ("level", "Рівень"),
                     ("stock", "Запас"),
                     ("order", "Закупити"),
+                    ("anomaly", "Аномалія"),
                 ],
             ),
             (
@@ -324,7 +326,8 @@ class BuildSalesApp(tk.Tk):
                 "від'ємне значення означає гірший результат. Базова MAE та виграш "
                 "обчислюються лише за місяцями з відомим попереднім роком. "
                 "«Закупити» додає страховий запас з похибки прогнозу; "
-                "надійність показує відносну точність прогнозу."
+                "надійність показує відносну точність прогнозу. Сезонна аномалія "
+                "порівнює останній місяць із тим самим місяцем попередніх років."
             ),
             bg="#f7f8f3",
             fg="#53645b",
@@ -344,6 +347,7 @@ class BuildSalesApp(tk.Tk):
             "gain",
             "order",
             "confidence",
+            "anomaly",
         )
         self.forecast_table = ttk.Treeview(parent, columns=columns, show="tree headings")
         self.forecast_table.heading("#0", text="Матеріал")
@@ -362,6 +366,7 @@ class BuildSalesApp(tk.Tk):
             ("gain", "Виграш, %", 80),
             ("order", "Закупити", 90),
             ("confidence", "Надійність, %", 105),
+            ("anomaly", "Сезонна аномалія", 130),
         ]:
             self.forecast_table.heading(key, text=title)
             self.forecast_table.column(key, anchor="center", width=width)
@@ -425,11 +430,13 @@ class BuildSalesApp(tk.Tk):
             series = [(row["period"], row["qty"]) for row in points]
             forecast = demand_forecast(series)
             accuracy = forecast_accuracy(series)
+            anomaly = seasonal_anomaly(series)
             materials.append(
                 {
                     **material,
                     "forecast": forecast,
                     "accuracy": accuracy,
+                    "anomaly": anomaly,
                     "weights": dict(self.cpri_weights),
                     "risk": shortage_risk(
                         [v for _, v in series][-12:],
@@ -552,6 +559,7 @@ class BuildSalesApp(tk.Tk):
                     m["risk"]["level"],
                     f"{m['stock']} {m['unit']}",
                     f"{m['procurement']['order_quantity']} {m['unit']}",
+                    "—" if m["anomaly"]["score"] is None else f"{m['anomaly']['score']:+.1f}%",
                 ),
             )
             forecast = [f"{point['period']}: {point['quantity']}" for point in m["forecast"]]
@@ -577,6 +585,9 @@ class BuildSalesApp(tk.Tk):
                     "—"
                     if m["procurement"]["confidence"] is None
                     else m["procurement"]["confidence"],
+                    "—"
+                    if m["anomaly"]["score"] is None
+                    else f"{m['anomaly']['score']:+.1f}% ({m['anomaly']['direction']})",
                 ),
             )
         for m in data["managers"]:
@@ -610,6 +621,7 @@ class BuildSalesApp(tk.Tk):
             font=("Segoe UI", 11, "bold"),
         ).pack(anchor="w", pady=(4, 14))
         procurement = material["procurement"]
+        anomaly = material["anomaly"]
         confidence = procurement["confidence"]
         confidence_text = "недостатньо даних" if confidence is None else f"{confidence}%"
         tk.Label(
@@ -619,6 +631,21 @@ class BuildSalesApp(tk.Tk):
                 f"страховий запас: {procurement['safety_stock']} {material['unit']} · "
                 f"надійність: {confidence_text} ({procurement['confidence_level']})"
             ),
+            fg="#53645b",
+            wraplength=590,
+            justify="left",
+        ).pack(anchor="w", pady=(0, 12))
+        anomaly_text = (
+            "недостатньо даних"
+            if anomaly["score"] is None
+            else (
+                f"{anomaly['score']:+.1f}% ({anomaly['direction']}); "
+                f"база: {anomaly['baseline']}, факт: {anomaly['actual']}"
+            )
+        )
+        tk.Label(
+            frame,
+            text=f"Сезонна аномалія останнього місяця: {anomaly_text}",
             fg="#53645b",
             wraplength=590,
             justify="left",
