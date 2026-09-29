@@ -17,6 +17,15 @@ EXPORT_COLUMNS = (
     ("revenue", "Виручка, ₴"),
 )
 
+IMPORT_TEMPLATE_COLUMNS = (
+    "sold_at",
+    "material",
+    "manager",
+    "customer",
+    "quantity",
+    "unit_price",
+)
+
 
 def anonymize_sales_rows(rows: list[dict]) -> list[dict]:
     """Return copies with stable local aliases for customers and managers.
@@ -41,6 +50,14 @@ def anonymize_sales_rows(rows: list[dict]) -> list[dict]:
         }
         for row in rows
     ]
+
+
+def create_sales_import_template(destination: str | Path) -> Path:
+    """Create an empty UTF-8 CSV template accepted by the sales importer."""
+    path = Path(destination)
+    with path.open("w", encoding="utf-8-sig", newline="") as file:
+        csv.writer(file).writerow(IMPORT_TEMPLATE_COLUMNS)
+    return path
 
 
 def export_sales_csv(rows: list[dict], destination: str | Path) -> Path:

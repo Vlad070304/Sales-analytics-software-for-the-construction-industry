@@ -28,6 +28,7 @@ python -m app.desktop
 ```
 
 Формат імпортного CSV наведено в [docs/import-format.md](docs/import-format.md).
+Походження демонстраційних даних і джерела реальних даних описано в [docs/data-sources.md](docs/data-sources.md).
 Заплановані напрями розвитку — у [docs/improvement-roadmap.md](docs/improvement-roadmap.md).
 Покрокова інструкція для користувача — у [START_HERE.md](D:\MAGISTERA\START_HERE.md).
 

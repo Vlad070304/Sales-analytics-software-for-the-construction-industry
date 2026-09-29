@@ -32,7 +32,7 @@ from app.database import (
     save_cpri_weights,
     update_material,
 )
-from app.export import anonymize_sales_rows, export_sales_csv
+from app.export import anonymize_sales_rows, create_sales_import_template, export_sales_csv
 
 
 class BuildSalesApp(tk.Tk):
@@ -1122,7 +1122,20 @@ class BuildSalesApp(tk.Tk):
         reload_table()
 
     def import_csv(self) -> None:
-        """Choose a CSV file, validate it locally, and open its review window."""
+        """Choose between creating an import template and validating a CSV file."""
+        create_template = messagebox.askyesnocancel(
+            "Імпорт продажів",
+            "Створити порожній CSV-шаблон для імпорту?\n\n"
+            "«Так» — зберегти шаблон із правильними назвами колонок.\n"
+            "«Ні» — обрати готовий CSV-файл для перевірки та імпорту.\n"
+            "«Скасувати» — закрити це вікно.",
+            parent=self,
+        )
+        if create_template is None:
+            return
+        if create_template:
+            self.create_import_template()
+            return
         path = filedialog.askopenfilename(
             title="Оберіть CSV-файл продажів",
             filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
@@ -1134,6 +1147,28 @@ class BuildSalesApp(tk.Tk):
             self.open_import_preview(report)
         except (OSError, ValueError) as error:
             messagebox.showerror("Помилка імпорту", str(error), parent=self)
+
+    def create_import_template(self) -> None:
+        """Save a blank CSV template that users can fill with real sales data."""
+        path = filedialog.asksaveasfilename(
+            title="Зберегти шаблон імпорту продажів",
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv")],
+            initialfile="buildsales-import-template.csv",
+        )
+        if not path:
+            return
+        try:
+            destination = create_sales_import_template(path)
+            messagebox.showinfo(
+                "Шаблон створено",
+                "У шаблоні вже є правильні назви колонок. Заповніть його даними, "
+                "а потім повторно натисніть «Імпортувати CSV» і виберіть «Ні».\n\n"
+                f"Файл: {destination}",
+                parent=self,
+            )
+        except OSError as error:
+            messagebox.showerror("Помилка створення шаблону", str(error), parent=self)
 
     def create_backup(self) -> None:
         """Create a timestamped manual database backup."""

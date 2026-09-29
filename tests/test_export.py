@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from app.export import anonymize_sales_rows, export_sales_csv
+from app.export import anonymize_sales_rows, create_sales_import_template, export_sales_csv
 
 
 class NonClosingStringIO(io.StringIO):
@@ -50,3 +50,14 @@ class CsvExportTests(unittest.TestCase):
         self.assertNotEqual(result[0]["manager"], result[2]["manager"])
         self.assertNotIn("Ірина Коваль", {row["manager"] for row in result})
         self.assertEqual(rows[0]["customer"], "ТОВ Будмонтаж")
+
+    def test_import_template_contains_only_required_columns(self) -> None:
+        """The generated template is accepted as the starting point for an import file."""
+        output = NonClosingStringIO()
+        with patch.object(Path, "open", return_value=output):
+            result = create_sales_import_template("import-template.csv")
+        self.assertEqual(result, Path("import-template.csv"))
+        self.assertEqual(
+            output.getvalue().lstrip("\ufeff").strip(),
+            "sold_at,material,manager,customer,quantity,unit_price",
+        )
