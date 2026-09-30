@@ -2,10 +2,16 @@
 
 import io
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
-from app.export import anonymize_sales_rows, create_sales_import_template, export_sales_csv
+from app.export import (
+    anonymize_sales_rows,
+    create_sales_import_template,
+    export_analytics_report,
+    export_sales_csv,
+)
 
 
 class NonClosingStringIO(io.StringIO):
@@ -61,3 +67,30 @@ class CsvExportTests(unittest.TestCase):
             output.getvalue().lstrip("\ufeff").strip(),
             "sold_at,material,manager,customer,quantity,unit_price",
         )
+
+    def test_analytics_report_includes_metrics_filters_and_recommendations(self) -> None:
+        """Research report records the selected data and explainable recommendations."""
+        materials = [
+            {
+                "name": "Цемент М500",
+                "forecast": [{"quantity": 120.0}],
+                "risk": {"score": 74.2},
+                "procurement": {"order_quantity": 34.5, "confidence": 81.0},
+                "anomaly": {"score": 20.0, "direction": "зростання"},
+                "accuracy": {"mae": 8.2},
+            }
+        ]
+        with patch.object(Path, "write_text", return_value=None) as write_text:
+            result = export_analytics_report(
+                {"revenue": 12000, "deals": 5, "materials": 1, "high_risk": 1},
+                materials,
+                {"Матеріал": "Цемент М500"},
+                "analytics.md",
+                created_at=datetime(2026, 9, 30, 12, 0),
+            )
+        report = write_text.call_args.args[0]
+        self.assertEqual(result, Path("analytics.md"))
+        self.assertIn("2026-09-30 12:00", report)
+        self.assertIn("Виручка: **12,000.00 ₴**", report)
+        self.assertIn("Цемент М500", report)
+        self.assertIn("+20.0% (зростання)", report)

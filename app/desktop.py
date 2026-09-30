@@ -32,7 +32,12 @@ from app.database import (
     save_cpri_weights,
     update_material,
 )
-from app.export import anonymize_sales_rows, create_sales_import_template, export_sales_csv
+from app.export import (
+    anonymize_sales_rows,
+    create_sales_import_template,
+    export_analytics_report,
+    export_sales_csv,
+)
 
 
 class BuildSalesApp(tk.Tk):
@@ -940,7 +945,20 @@ class BuildSalesApp(tk.Tk):
         )
 
     def export_csv(self) -> None:
-        """Save the active, filtered sales dataset to a local CSV file."""
+        """Offer an active-sales CSV or a reproducible analytical report export."""
+        export_sales = messagebox.askyesnocancel(
+            "Експорт даних",
+            "Який файл створити?\n\n"
+            "«Так» — CSV із відфільтрованими продажами.\n"
+            "«Ні» — аналітичний Markdown-звіт для дослідження.\n"
+            "«Скасувати» — не створювати файл.",
+            parent=self,
+        )
+        if export_sales is None:
+            return
+        if not export_sales:
+            self.export_analytics_report()
+            return
         anonymize = messagebox.askyesnocancel(
             "Захист персональних даних",
             "Експортувати знеособлені дані?\n\n"
@@ -989,6 +1007,43 @@ class BuildSalesApp(tk.Tk):
             )
         except OSError as error:
             messagebox.showerror("Помилка експорту", str(error), parent=self)
+
+    def export_analytics_report(self) -> None:
+        """Save the active analytical results as a local Markdown research report."""
+        path = filedialog.asksaveasfilename(
+            title="Зберегти аналітичний звіт",
+            defaultextension=".md",
+            filetypes=[("Markdown files", "*.md"), ("Text files", "*.txt")],
+            initialfile="buildsales-analytics-report.md",
+        )
+        if not path:
+            return
+        data, materials = self.metrics()
+        revenue = sum(sale["quantity"] * sale["unit_price"] for sale in data["sales"])
+        summary = {
+            "revenue": revenue,
+            "deals": len(data["sales"]),
+            "materials": len(materials),
+            "high_risk": sum(material["risk"]["level"] == "високий" for material in materials),
+        }
+        filters = {
+            "Дата від": self.filter_start.get(),
+            "Дата до": self.filter_end.get(),
+            "Категорія": self.filter_category.get().replace("Усі категорії", ""),
+            "Матеріал": self.filter_material.get().replace("Усі матеріали", ""),
+            "Менеджер": self.filter_manager.get().replace("Усі менеджери", ""),
+            "Клієнт": self.filter_customer.get().replace("Усі клієнти", ""),
+        }
+        try:
+            destination = export_analytics_report(summary, materials, filters, path)
+            messagebox.showinfo(
+                "Звіт сформовано",
+                "Звіт містить показники вибірки, прогноз, CPRI, рекомендації закупівлі "
+                f"та сезонні аномалії.\n\nФайл: {destination}",
+                parent=self,
+            )
+        except OSError as error:
+            messagebox.showerror("Помилка формування звіту", str(error), parent=self)
 
     def open_materials(self) -> None:
         """Open the material directory and its create, update, and delete actions."""
